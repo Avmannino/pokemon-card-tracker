@@ -13,6 +13,11 @@ import Dashboard from "./Dashboard.jsx";
 import { money, cardTitle } from "./format.js";
 
 const GRADES = ["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"];
+
+// Grades that get their own column in the collection table. PSA 7 is still
+// ownable and still enterable via the PSA values modal, it just isn't worth
+// a column.
+const TABLE_GRADES = GRADES.filter((grade) => grade !== "PSA_7");
 const SEARCH_PAGE_SIZE = 10;
 
 function pullTime(iso) {
@@ -61,7 +66,7 @@ function gradeLabel(grade) {
 // key === null means the column can't be sorted.
 const COLLECTION_COLUMNS = [
   { key: "card", label: "Card", numeric: false },
-  ...GRADES.map((grade) => ({
+  ...TABLE_GRADES.map((grade) => ({
     key: grade,
     label: gradeLabel(grade),
     numeric: true,
@@ -729,7 +734,7 @@ function App() {
                       </div>
                     </td>
 
-                    {GRADES.map((grade) => (
+                    {TABLE_GRADES.map((grade) => (
                       <td key={grade}>
                         <div className="price-cell">
                           <strong>
