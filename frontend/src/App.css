@@ -613,6 +613,7 @@ h2 {
 }
 
 .search-form input,
+.collection-search input,
 .modal input,
 .modal select,
 .modal textarea {
@@ -633,13 +634,39 @@ h2 {
   padding: 14px 16px;
 }
 
+.collection-search {
+  display: flex;
+
+  gap: 14px;
+
+  align-items: center;
+
+  margin-bottom: 16px;
+}
+
+.collection-search input {
+  max-width: 420px;
+
+  padding: 11px 14px;
+}
+
+.collection-search span {
+  color: #737f93;
+
+  font-size: 0.82rem;
+
+  white-space: nowrap;
+}
+
 .search-form input::placeholder,
+.collection-search input::placeholder,
 .modal input::placeholder,
 .modal textarea::placeholder {
   color: #596378;
 }
 
 .search-form input:focus,
+.collection-search input:focus,
 .modal input:focus,
 .modal select:focus,
 .modal textarea:focus {

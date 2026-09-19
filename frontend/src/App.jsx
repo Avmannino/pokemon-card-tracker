@@ -91,6 +91,7 @@ function App() {
   });
 
   const [query, setQuery] = useState("");
+  const [collectionQuery, setCollectionQuery] = useState("");
   const searchInputRef = useRef(null);
   const [searchResults, setSearchResults] = useState([]);
   const [searchPage, setSearchPage] = useState(0);
@@ -137,6 +138,36 @@ function App() {
     () => collection.summary?.known_market_total || 0,
     [collection]
   );
+
+  // Every space-separated term must match somewhere on the item, so
+  // "lugia psa 9" narrows rather than widens.
+  const filteredItems = useMemo(() => {
+    const terms = collectionQuery
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (terms.length === 0) {
+      return collection.items;
+    }
+
+    return collection.items.filter((item) => {
+      const haystack = [
+        item.card.name,
+        item.card.card_number,
+        item.card.set_name,
+        item.card.rarity,
+        item.card.variant,
+        gradeLabel(item.ownership_grade),
+        item.notes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return terms.every((term) => haystack.includes(term));
+    });
+  }, [collection.items, collectionQuery]);
 
   const searchPages = useMemo(
     () => chunk(searchResults, SEARCH_PAGE_SIZE),
@@ -518,6 +549,27 @@ function App() {
           </div>
         </div>
 
+        {!loadingCollection && collection.items.length > 0 && (
+          <div className="collection-search">
+            <input
+              type="search"
+              value={collectionQuery}
+              onChange={(event) =>
+                setCollectionQuery(event.target.value)
+              }
+              placeholder="Search your collection by name, set, number, grade..."
+              aria-label="Search your collection"
+            />
+
+            {collectionQuery.trim() && (
+              <span>
+                Showing {filteredItems.length} of{" "}
+                {collection.items.length}
+              </span>
+            )}
+          </div>
+        )}
+
         {loadingCollection ? (
           <div className="empty-state">
             Loading collection…
@@ -527,7 +579,10 @@ function App() {
             Search for a card above and add your first card.
           </div>
         ) : (
-          <div className="collection-scroll">
+          <div
+            className="collection-scroll"
+            hidden={filteredItems.length === 0}
+          >
             <table className="collection-table">
               <thead>
                 <tr>
@@ -544,7 +599,7 @@ function App() {
               </thead>
 
               <tbody>
-                {collection.items.map((item) => (
+                {filteredItems.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <div className="table-card-cell">
@@ -646,6 +701,15 @@ function App() {
             </table>
           </div>
         )}
+
+        {!loadingCollection &&
+          collection.items.length > 0 &&
+          filteredItems.length === 0 && (
+            <div className="empty-state">
+              No cards in your collection match "
+              {collectionQuery.trim()}".
+            </div>
+          )}
       </section>
 
       <section className="method-panel">
