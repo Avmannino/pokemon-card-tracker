@@ -49,9 +49,14 @@ function refreshStatusText(status) {
     ? ` · Refresh again in ${Math.ceil(status.manual_available_in / 60)} min`
     : "";
 
+  const quota = status.quota?.tcggo;
+  const quotaText = quota
+    ? ` · Graded API ${quota.remaining}${quota.limit ? `/${quota.limit}` : ""} left`
+    : "";
+
   return (
     `${last}${failed ? ` (${failed} failed)` : ""}` +
-    ` · Next auto ${pullTime(status.next_pull_at)}${cooldown}`
+    ` · Next auto ${pullTime(status.next_pull_at)}${cooldown}${quotaText}`
   );
 }
 

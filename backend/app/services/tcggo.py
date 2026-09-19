@@ -2,12 +2,15 @@ import asyncio
 import json
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from .. import db
 from ..config import settings
+from . import state_store
 
 
 HOST = "pokemon-tcg-api.p.rapidapi.com"
@@ -21,24 +24,68 @@ PSA_GRADES = ("7", "8", "9", "10")
 # RapidAPI Basic plan: 30 requests/minute.
 REQUEST_SPACING_SECONDS = 2.1
 
-# Our card -> TCGGO card id, so later pulls skip the search request.
+# Legacy local id cache, only read to seed the database copy.
 IDS_PATH = Path(__file__).resolve().parents[2] / ".tcggo_ids.json"
+
+# RapidAPI's plan here is a *soft* limit: requests past the daily quota are
+# still served and billed as overage. So we never send a request that would
+# dip into the last few.
+MIN_REMAINING = 3
+
+# How long before re-searching for a card TCGGO couldn't match.
+NOT_FOUND_RETRY = timedelta(days=7)
 
 _last_request_at = 0.0
 
-# Requests left today per RapidAPI's response headers, and when that count
-# stops being valid (the quota resets).
-_remaining: int | None = None
-_remaining_expires_at = 0.0
+# Daily quota as reported by RapidAPI's response headers. It's shared through
+# app_state so a backend that just woke up, or the scheduled GitHub Action,
+# knows what's left without spending a request to find out.
+_quota: dict[str, Any] | None = None
+
+
+def _remember_quota(remaining: int, limit: int | None, reset_seconds: int) -> None:
+    global _quota
+
+    _quota = {
+        "remaining": remaining,
+        "limit": limit,
+        "resets_at": (
+            datetime.now(timezone.utc) + timedelta(seconds=reset_seconds)
+        ).isoformat(),
+    }
+    state_store.set("tcggo_quota", _quota)
+
+
+def quota() -> dict[str, Any] | None:
+    """Latest known quota ({remaining, limit, resets_at}), or None if unknown
+    or the daily window has since reset."""
+    global _quota
+
+    current = _quota or state_store.get("tcggo_quota")
+
+    if not current:
+        return None
+
+    if datetime.fromisoformat(current["resets_at"]) <= datetime.now(timezone.utc):
+        _quota = None
+        return None
+
+    _quota = current
+    return current
 
 
 def requests_remaining() -> int | None:
-    """TCGGO requests left today as of the last request, or None if unknown
-    (nothing requested yet, or the daily quota has since reset)."""
-    if time.monotonic() >= _remaining_expires_at:
+    current = quota()
+    return current["remaining"] if current else None
+
+
+def seconds_until_reset() -> int | None:
+    current = quota()
+    if not current:
         return None
 
-    return _remaining
+    delta = datetime.fromisoformat(current["resets_at"]) - datetime.now(timezone.utc)
+    return max(0, int(delta.total_seconds()))
 
 
 class TcggoError(RuntimeError):
@@ -55,7 +102,15 @@ def is_configured() -> bool:
 
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    global _last_request_at, _remaining, _remaining_expires_at
+    global _last_request_at
+
+    remaining = requests_remaining()
+    if remaining is not None and remaining <= MIN_REMAINING:
+        hours = (seconds_until_reset() or 0) / 3600
+        raise TcggoRateLimited(
+            f"TCGGO daily quota nearly used up ({remaining} left, resets in "
+            f"{hours:.1f}h). Skipped to avoid overage charges."
+        )
 
     wait = REQUEST_SPACING_SECONDS - (time.monotonic() - _last_request_at)
     if wait > 0:
@@ -72,11 +127,20 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
             params=params,
         )
 
-    remaining = response.headers.get("x-ratelimit-requests-remaining")
-    reset_seconds = response.headers.get("x-ratelimit-requests-reset")
-    if remaining and remaining.isdigit() and reset_seconds and reset_seconds.isdigit():
-        _remaining = int(remaining)
-        _remaining_expires_at = time.monotonic() + int(reset_seconds)
+    def _int(header: str) -> int | None:
+        try:
+            return int(response.headers[header])
+        except (KeyError, ValueError):
+            return None
+
+    remaining_header = _int("x-ratelimit-requests-remaining")
+    reset_header = _int("x-ratelimit-requests-reset")
+    if remaining_header is not None and reset_header is not None:
+        _remember_quota(
+            remaining_header,
+            _int("x-ratelimit-requests-limit"),
+            reset_header,
+        )
 
     if response.status_code == 429:
         raise TcggoRateLimited("TCGGO daily request limit reached.")
@@ -96,7 +160,7 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
     return response.json()
 
 
-def _load_ids() -> dict[str, int]:
+def _load_legacy_ids() -> dict[str, int]:
     try:
         return json.loads(IDS_PATH.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
@@ -110,23 +174,40 @@ def _search_text(card: dict[str, Any]) -> str:
 
 
 async def resolve_card_id(card: dict[str, Any]) -> int | None:
-    """TCGGO's id for one of our cards, matched exactly on TCGPlayer id."""
+    """TCGGO's id for one of our cards, matched exactly on TCGPlayer id.
+    Remembered on the card row so later pulls cost one request, not two."""
+    extras = card.get("marketplace_urls") or {}
+    if extras.get("tcggo_id"):
+        return int(extras["tcggo_id"])
+
+    # A card TCGGO couldn't match isn't searched for again every sync.
+    not_found_at = extras.get("tcggo_not_found_at")
+    if not_found_at and (
+        datetime.now(timezone.utc) - datetime.fromisoformat(not_found_at)
+        < NOT_FOUND_RETRY
+    ):
+        return None
+
     tcgplayer_id = str(card.get("tcgplayer_id") or "")
     if not tcgplayer_id:
         return None
 
-    ids = _load_ids()
-    if tcgplayer_id in ids:
-        return ids[tcgplayer_id]
+    legacy = _load_legacy_ids().get(tcgplayer_id)
+    if legacy:
+        db.update_marketplace_urls(card["id"], {"tcggo_id": legacy})
+        return legacy
 
     payload = await _get("/cards", {"search": _search_text(card)})
 
     for candidate in payload.get("data", []):
         if str(candidate.get("tcgplayer_id")) == tcgplayer_id:
-            ids[tcgplayer_id] = candidate["id"]
-            IDS_PATH.write_text(json.dumps(ids, indent=2))
+            db.update_marketplace_urls(card["id"], {"tcggo_id": candidate["id"]})
             return candidate["id"]
 
+    db.update_marketplace_urls(
+        card["id"],
+        {"tcggo_not_found_at": datetime.now(timezone.utc).isoformat()},
+    )
     return None
 
 

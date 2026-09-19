@@ -33,8 +33,11 @@ class Settings:
 
         # The only two times of day (server-local) that prices are pulled
         # from PokeTrace.
-        self.refresh_am_time = _clock_time("REFRESH_AM_TIME", "08:00")
-        self.refresh_pm_time = _clock_time("REFRESH_PM_TIME", "20:00")
+        self.refresh_am_time = _clock_time("REFRESH_AM_TIME", "08:07")
+        self.refresh_timezone = os.getenv(
+            "REFRESH_TIMEZONE", "America/New_York"
+        ).strip()
+        self.refresh_pm_time = _clock_time("REFRESH_PM_TIME", "20:07")
 
         missing = []
         if not self.supabase_url:

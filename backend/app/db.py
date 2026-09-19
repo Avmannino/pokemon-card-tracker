@@ -68,6 +68,12 @@ def save_card(card: dict[str, Any]) -> dict[str, Any]:
     }
 
     if existing:
+        # Keep extra keys (e.g. tcggo_id) that a catalog refresh doesn't know.
+        payload["marketplace_urls"] = {
+            **(existing.get("marketplace_urls") or {}),
+            **payload["marketplace_urls"],
+        }
+
         response = (
             _client().table("cards")
             .update(payload)
@@ -78,6 +84,19 @@ def save_card(card: dict[str, Any]) -> dict[str, Any]:
 
     response = _client().table("cards").insert(payload).execute()
     return response.data[0]
+
+
+def update_marketplace_urls(card_id: str, extra: dict[str, Any]) -> None:
+    """Merge `extra` into a card's marketplace_urls (used to remember the
+    TCGGO id so a sleeping/redeployed backend never has to look it up again)."""
+    card = get_card(card_id)
+    if not card:
+        return
+
+    merged = {**(card.get("marketplace_urls") or {}), **extra}
+    _client().table("cards").update({"marketplace_urls": merged}).eq(
+        "id", card_id
+    ).execute()
 
 
 def add_collection_item(

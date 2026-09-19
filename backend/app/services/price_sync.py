@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .. import db
 from ..config import settings
-from . import poketrace, tcggo
+from . import poketrace, state_store, tcggo
 
 
 logger = logging.getLogger("price_sync")
@@ -55,8 +56,12 @@ class SyncCooldown(RuntimeError):
         self.retry_after = retry_after
 
 
+def _tz() -> ZoneInfo:
+    return ZoneInfo(settings.refresh_timezone)
+
+
 def _now() -> datetime:
-    return datetime.now().astimezone()
+    return datetime.now(_tz())
 
 
 def _slots_around(now: datetime) -> list[datetime]:
@@ -65,7 +70,7 @@ def _slots_around(now: datetime) -> list[datetime]:
     for offset in (-1, 0, 1):
         day = now.date() + timedelta(days=offset)
         for clock in (settings.refresh_am_time, settings.refresh_pm_time):
-            slots.add(datetime.combine(day, clock).astimezone())
+            slots.add(datetime.combine(day, clock, tzinfo=_tz()))
 
     return sorted(slots)
 
@@ -80,6 +85,11 @@ def next_slot(now: datetime) -> datetime:
 
 
 def _read_state() -> dict[str, Any] | None:
+    state = state_store.get("price_sync")
+    if state is not None:
+        return state
+
+    # Older installs kept this in a local file.
     try:
         return json.loads(STATE_PATH.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
@@ -87,7 +97,7 @@ def _read_state() -> dict[str, Any] | None:
 
 
 def _write_state(state: dict[str, Any]) -> None:
-    STATE_PATH.write_text(json.dumps(state, indent=2))
+    state_store.set("price_sync", state)
 
 
 async def pull_card_raw_prices(card_id: str) -> int:
@@ -181,25 +191,39 @@ async def _pull_raw(record: dict[str, Any]) -> None:
             await asyncio.sleep(REQUEST_SPACING_SECONDS)
 
 
-async def _pull_graded(
-    record: dict[str, Any],
-    keep_in_reserve: bool = False,
-) -> None:
+def _scheduled_runs_before_reset() -> int:
+    """Scheduled syncs still to come before TCGGO's daily quota resets."""
+    seconds = tcggo.seconds_until_reset()
+    if seconds is None:
+        return 0
+
+    now = _now()
+    end = now + timedelta(seconds=seconds)
+
+    return sum(1 for slot in _slots_around(now) if now < slot <= end)
+
+
+async def _pull_graded(record: dict[str, Any]) -> None:
     """Pulls graded prices for the collection, counting results into
-    `record`. With `keep_in_reserve`, stops once TCGGO's remaining requests
-    for the day would no longer cover a full scheduled pull."""
+    `record`. Stops once TCGGO's remaining daily requests would no longer
+    cover the scheduled syncs still to come before the quota resets, so no
+    sync (manual or scheduled) can push the day into paid overage."""
     card_ids, record["skipped"] = _card_ids_for_pull(MAX_GRADED_CARDS_PER_PULL)
     _progress.update(phase="graded", done=0, total=len(card_ids))
 
+    upcoming = _scheduled_runs_before_reset()
+    reserve = upcoming * len(card_ids) + (5 if upcoming else 0)
+
     for index, card_id in enumerate(card_ids):
-        if keep_in_reserve:
-            remaining = tcggo.requests_remaining()
-            if remaining is not None and remaining <= len(card_ids):
-                record["stopped_early"] = (
-                    "Kept today's remaining TCGGO requests for the scheduled "
-                    "pulls."
-                )
-                break
+        remaining = tcggo.requests_remaining()
+        if remaining is not None and remaining <= reserve:
+            hours = (tcggo.seconds_until_reset() or 0) / 3600
+            record["stopped_early"] = (
+                f"Graded sync paused: {remaining} TCGGO requests left today, "
+                f"kept for the {upcoming} scheduled sync(s) before the quota "
+                f"resets in {hours:.1f}h."
+            )
+            break
 
         record["attempted"] += 1
 
@@ -386,7 +410,7 @@ async def _manual_sync() -> None:
                 await _pull_raw(record["raw"])
 
                 if tcggo.is_configured():
-                    await _pull_graded(record["graded"], keep_in_reserve=True)
+                    await _pull_graded(record["graded"])
             except Exception as exc:
                 logger.exception("Manual price sync failed")
                 record["error"] = f"{type(exc).__name__}: {exc}"
@@ -445,5 +469,6 @@ def get_status() -> dict[str, Any]:
         "syncing": _progress["running"],
         "progress": dict(_progress) if _progress["running"] else None,
         "manual_available_in": _manual_cooldown_remaining(),
+        "quota": {"tcggo": tcggo.quota()} if tcggo.is_configured() else None,
         "next_pull_at": next_slot(_now()).isoformat(),
     }
