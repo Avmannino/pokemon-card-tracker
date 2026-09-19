@@ -1,6 +1,6 @@
-import asyncio
+
 import logging
-from contextlib import asynccontextmanager, suppress
+import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -15,15 +15,8 @@ from .services.valuation import build_market_values
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    scheduler = asyncio.create_task(price_sync.run_scheduler())
-
-    try:
-        yield
-    finally:
-        scheduler.cancel()
-        with suppress(asyncio.CancelledError):
-            await scheduler
+async def lifespan(app: FastAPI):
+    yield
 
 
 app = FastAPI(
