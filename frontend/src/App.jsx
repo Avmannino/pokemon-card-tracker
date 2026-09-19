@@ -298,7 +298,7 @@ function App() {
         notes: addForm.notes.trim() || null,
       };
 
-      await addCollectionItem(payload);
+      const result = await addCollectionItem(payload);
 
       setAddForm(emptyAddForm());
       setQuery("");
@@ -307,7 +307,10 @@ function App() {
       await loadCollection();
 
       setMessage(
-        "Card added. Its price will appear after the next scheduled market pull."
+        result.price_error
+          ? `Card added, but its raw price could not be fetched: ${result.price_error}. ` +
+            "It will fill in at the next scheduled pull."
+          : "Card added and raw market price fetched."
       );
     } catch (err) {
       setError(err.message);

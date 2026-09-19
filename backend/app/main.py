@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -133,7 +134,7 @@ def portfolio_dashboard() -> dict[str, Any]:
 
 
 @app.post("/api/collection")
-def add_to_collection(
+async def add_to_collection(
     request: AddCollectionRequest,
 ) -> dict[str, Any]:
     card = db.save_card(request.card.model_dump())
@@ -145,10 +146,25 @@ def add_to_collection(
         notes=request.notes,
     )
 
-    # No price pull here: prices only come from PokeTrace on the twice-daily
-    # schedule (services/price_sync.py), so a new card shows no value until
-    # the next pull.
-    return {"item": serialize_collection_item(item, card)}
+    # One PokeTrace call for the card you just added, so it shows a price
+    # straight away instead of waiting for the next scheduled pull. This is
+    # a deliberate single add, not a collection-wide refresh. If pricing is
+    # unavailable, keep the card rather than losing the user's entry.
+    price_error = None
+    try:
+        await price_sync.pull_card_raw_prices(card["id"])
+    except Exception as exc:
+        price_error = str(exc)
+        logging.getLogger("main").exception(
+            "Price fetch failed for newly added card %s", card["id"]
+        )
+
+    card = db.get_card(card["id"])
+
+    return {
+        "item": serialize_collection_item(item, card),
+        "price_error": price_error,
+    }
 
 
 @app.delete("/api/collection/{item_id}")
