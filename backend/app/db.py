@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -6,10 +7,21 @@ from supabase import Client, create_client
 from .config import settings
 
 
-supabase: Client = create_client(
-    settings.supabase_url,
-    settings.supabase_secret_key,
-)
+_local = threading.local()
+
+
+def _client() -> Client:
+    # FastAPI runs sync endpoints in parallel worker threads, and a single
+    # shared Supabase client dropped connections under concurrent requests
+    # (httpx.RemoteProtocolError: Server disconnected -> HTTP 500). Each
+    # thread gets its own client and connection pool instead.
+    if not hasattr(_local, "client"):
+        _local.client = create_client(
+            settings.supabase_url,
+            settings.supabase_secret_key,
+        )
+
+    return _local.client
 
 
 def utc_now_iso() -> str:
@@ -18,7 +30,7 @@ def utc_now_iso() -> str:
 
 def get_card(card_id: str) -> dict[str, Any] | None:
     response = (
-        supabase.table("cards")
+        _client().table("cards")
         .select("*")
         .eq("id", card_id)
         .limit(1)
@@ -29,7 +41,7 @@ def get_card(card_id: str) -> dict[str, Any] | None:
 
 def get_card_by_poketrace_id(poketrace_id: str) -> dict[str, Any] | None:
     response = (
-        supabase.table("cards")
+        _client().table("cards")
         .select("*")
         .eq("poketrace_id", poketrace_id)
         .limit(1)
@@ -57,14 +69,14 @@ def save_card(card: dict[str, Any]) -> dict[str, Any]:
 
     if existing:
         response = (
-            supabase.table("cards")
+            _client().table("cards")
             .update(payload)
             .eq("id", existing["id"])
             .execute()
         )
         return response.data[0]
 
-    response = supabase.table("cards").insert(payload).execute()
+    response = _client().table("cards").insert(payload).execute()
     return response.data[0]
 
 
@@ -82,17 +94,17 @@ def add_collection_item(
         "purchase_price": purchase_price,
         "notes": notes,
     }
-    response = supabase.table("collection_items").insert(payload).execute()
+    response = _client().table("collection_items").insert(payload).execute()
     return response.data[0]
 
 
 def delete_collection_item(item_id: str) -> None:
-    supabase.table("collection_items").delete().eq("id", item_id).execute()
+    _client().table("collection_items").delete().eq("id", item_id).execute()
 
 
 def get_collection_items() -> list[dict[str, Any]]:
     response = (
-        supabase.table("collection_items")
+        _client().table("collection_items")
         .select("*")
         .order("created_at", desc=False)
         .execute()
@@ -118,13 +130,13 @@ def insert_price_snapshot(
         "observed_at": observed_at or utc_now_iso(),
         "metadata": metadata or {},
     }
-    response = supabase.table("price_snapshots").insert(payload).execute()
+    response = _client().table("price_snapshots").insert(payload).execute()
     return response.data[0]
 
 
 def get_price_snapshots(card_id: str, limit: int = 500) -> list[dict[str, Any]]:
     response = (
-        supabase.table("price_snapshots")
+        _client().table("price_snapshots")
         .select("*")
         .eq("card_id", card_id)
         .order("observed_at", desc=True)
