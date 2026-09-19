@@ -42,22 +42,10 @@ function refreshStatusText(status) {
   }
 
   const last = status.last_pull_at
-    ? `Last market pull ${pullTime(status.last_pull_at)}`
-    : "No market pull yet";
-  const failed = status.last_result?.failed || 0;
-  const cooldown = status.manual_available_in
-    ? ` · Refresh again in ${Math.ceil(status.manual_available_in / 60)} min`
-    : "";
+    ? `Last synced ${pullTime(status.last_pull_at)}`
+    : "Not synced yet";
 
-  const quota = status.quota?.tcggo;
-  const quotaText = quota
-    ? ` · Graded API ${quota.remaining}${quota.limit ? `/${quota.limit}` : ""} left`
-    : "";
-
-  return (
-    `${last}${failed ? ` (${failed} failed)` : ""}` +
-    ` · Next auto ${pullTime(status.next_pull_at)}${cooldown}${quotaText}`
-  );
+  return `${last} · Next auto sync ${pullTime(status.next_pull_at)}`;
 }
 
 function syncSummary(status) {
