@@ -7,10 +7,11 @@ import {
   getRefreshStatus,
   saveGradedValues,
   searchCards,
+  startSync,
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import Dashboard from "./Dashboard.jsx";
-import { money, cardTitle, gradeLabel } from "./format.js";
+import { money, cardTitle, gradeLabel, percent } from "./format.js";
 
 const GRADES = ["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"];
 
@@ -34,14 +35,88 @@ function refreshStatusText(status) {
     return "";
   }
 
+  if (status.syncing && status.progress) {
+    const { phase, done, total } = status.progress;
+
+    return `Syncing ${phase === "graded" ? "graded" : "raw"} prices… ${done}/${total}`;
+  }
+
   const last = status.last_pull_at
     ? `Last market pull ${pullTime(status.last_pull_at)}`
     : "No market pull yet";
   const failed = status.last_result?.failed || 0;
+  const cooldown = status.manual_available_in
+    ? ` · Refresh again in ${Math.ceil(status.manual_available_in / 60)} min`
+    : "";
 
   return (
     `${last}${failed ? ` (${failed} failed)` : ""}` +
-    ` · Next ${pullTime(status.next_pull_at)}`
+    ` · Next auto ${pullTime(status.next_pull_at)}${cooldown}`
+  );
+}
+
+function syncSummary(status) {
+  const manual = status?.manual;
+
+  if (!manual) {
+    return "Sync finished.";
+  }
+
+  if (manual.error) {
+    return `Sync stopped early: ${manual.error}`;
+  }
+
+  const { raw, graded } = manual;
+  const parts = [`raw prices updated for ${raw.succeeded} of ${raw.attempted} cards`];
+
+  if (graded.attempted > 0) {
+    parts.push(`graded prices found for ${graded.with_data} of ${graded.attempted}`);
+  }
+
+  const problems = [raw, graded]
+    .map((part) => part.stopped_early)
+    .filter(Boolean);
+
+  const failed = raw.failed + graded.failed;
+
+  return (
+    `Synced: ${parts.join("; ")}.` +
+    (failed ? ` ${failed} failed.` : "") +
+    (problems.length ? ` ${problems.join(" ")}` : "")
+  );
+}
+
+function TrendBadge({ week }) {
+  if (!week) {
+    return null;
+  }
+
+  if (!week.change) {
+    return (
+      <span
+        className="trend-arrow flat"
+        title={
+          week.has_history
+            ? "Raw value unchanged over the past week"
+            : "Not enough price history yet"
+        }
+      >
+        {week.has_history ? "▬ $0.00 (0.00%)" : "– New"}
+      </span>
+    );
+  }
+
+  const up = week.change > 0;
+
+  return (
+    <span
+      className={`trend-arrow ${up ? "up" : "down"}`}
+      title="Raw value over the past week"
+    >
+      {up ? "▲ +" : "▼ −"}
+      {money(Math.abs(week.change))}
+      {week.change_pct !== null && ` (${percent(week.change_pct)})`}
+    </span>
   );
 }
 
@@ -126,8 +201,9 @@ function App() {
   const [loadingCollection, setLoadingCollection] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [reloading, setReloading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState(null);
+  const watchingSync = useRef(false);
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
@@ -148,9 +224,44 @@ function App() {
     }
   }
 
+  // Polls until the backend finishes the sync that's running (ours, or the
+  // scheduled one), then reloads the collection. Returns the final status.
+  async function watchSync() {
+    if (watchingSync.current) {
+      return null;
+    }
+
+    watchingSync.current = true;
+    setSyncing(true);
+
+    try {
+      let status = await getRefreshStatus();
+      setRefreshStatus(status);
+
+      while (status.syncing) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        status = await getRefreshStatus();
+        setRefreshStatus(status);
+      }
+
+      await loadCollection();
+      return status;
+    } finally {
+      watchingSync.current = false;
+      setSyncing(false);
+    }
+  }
+
   async function loadRefreshStatus() {
     try {
-      setRefreshStatus(await getRefreshStatus());
+      const status = await getRefreshStatus();
+      setRefreshStatus(status);
+
+      // A sync is already running (e.g. the page was reloaded mid-sync, or
+      // the scheduled pull just started), so pick up its progress.
+      if (status.syncing) {
+        watchSync();
+      }
     } catch {
       // Status is informational only; the collection view still works.
     }
@@ -335,18 +446,26 @@ function App() {
     }
   }
 
-  // Re-reads what's already stored in our database; never calls PokeTrace.
-  async function handleReload() {
-    setReloading(true);
+  // Manual sync: pulls fresh prices now, on top of the twice-daily schedule.
+  async function handleSyncNow() {
     setError("");
     setMessage("");
 
-    await Promise.all([loadCollection(), loadRefreshStatus()]);
+    try {
+      await startSync();
+    } catch (err) {
+      // Includes "already running" and the cooldown message from the server.
+      setError(err.message);
+      loadRefreshStatus();
+      return;
+    }
 
-    setReloading(false);
-    setMessage(
-      "Reloaded stored prices. New market prices are only pulled on the twice-daily schedule."
-    );
+    try {
+      const status = await watchSync();
+      setMessage(syncSummary(status));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function handleSavePsa(event) {
@@ -417,10 +536,10 @@ function App() {
             <button
               type="button"
               className="secondary-button"
-              onClick={handleReload}
-              disabled={reloading}
+              onClick={handleSyncNow}
+              disabled={syncing}
             >
-              {reloading ? "Refreshing…" : "Refresh Prices"}
+              {syncing ? "Syncing…" : "Refresh Prices"}
             </button>
 
             <small>{refreshStatusText(refreshStatus)}</small>
@@ -720,6 +839,8 @@ function App() {
                         <div>
                           <strong>
                             {cardTitle(item.card)}
+
+                            <TrendBadge week={item.week_change} />
                           </strong>
 
                           <span>

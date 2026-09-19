@@ -99,6 +99,33 @@ def _value_at(breakpoints: tuple[list[date], list[float]], day: date) -> float |
     return estimates[max(index, 0)]
 
 
+def value_change(
+    snapshots_desc: list[dict[str, Any]],
+    grade: str,
+    days_back: int = 7,
+) -> dict[str, Any] | None:
+    """Change in one card's estimate for `grade` over the last `days_back`
+    days, or None when there isn't a price for it yet."""
+    today = datetime.now(timezone.utc).date()
+    breakpoints = _item_breakpoints(snapshots_desc, grade)
+
+    current = _value_at(breakpoints, today)
+    past = _value_at(breakpoints, today - timedelta(days=days_back))
+
+    if current is None or past is None:
+        return None
+
+    change = round(current - past, 2)
+
+    return {
+        "change": change,
+        "change_pct": round((change / past) * 100, 2) if past else None,
+        # False while the card has only one price on record, so a $0 change
+        # means "no history yet" rather than "hasn't moved".
+        "has_history": len(breakpoints[0]) > 1,
+    }
+
+
 def build_dashboard(
     entries: list[dict[str, Any]],
     now: datetime | None = None,

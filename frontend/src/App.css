@@ -1250,6 +1250,31 @@ h2 {
   gap: 3px;
 }
 
+.table-card-cell .trend-arrow {
+  margin-left: 8px;
+
+  font-size: 0.74rem;
+  font-weight: 700;
+
+  white-space: nowrap;
+
+  cursor: help;
+}
+
+.table-card-cell .trend-arrow.up {
+  color: #5fe3a4;
+}
+
+.table-card-cell .trend-arrow.down {
+  color: #f18a8a;
+}
+
+.table-card-cell .trend-arrow.flat {
+  color: #737f93;
+
+  font-weight: 600;
+}
+
 .table-card-cell strong {
   color: #f7f9ff;
 }

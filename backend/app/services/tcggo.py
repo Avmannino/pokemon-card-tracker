@@ -26,6 +26,20 @@ IDS_PATH = Path(__file__).resolve().parents[2] / ".tcggo_ids.json"
 
 _last_request_at = 0.0
 
+# Requests left today per RapidAPI's response headers, and when that count
+# stops being valid (the quota resets).
+_remaining: int | None = None
+_remaining_expires_at = 0.0
+
+
+def requests_remaining() -> int | None:
+    """TCGGO requests left today as of the last request, or None if unknown
+    (nothing requested yet, or the daily quota has since reset)."""
+    if time.monotonic() >= _remaining_expires_at:
+        return None
+
+    return _remaining
+
 
 class TcggoError(RuntimeError):
     pass
@@ -41,7 +55,7 @@ def is_configured() -> bool:
 
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    global _last_request_at
+    global _last_request_at, _remaining, _remaining_expires_at
 
     wait = REQUEST_SPACING_SECONDS - (time.monotonic() - _last_request_at)
     if wait > 0:
@@ -57,6 +71,12 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
             },
             params=params,
         )
+
+    remaining = response.headers.get("x-ratelimit-requests-remaining")
+    reset_seconds = response.headers.get("x-ratelimit-requests-reset")
+    if remaining and remaining.isdigit() and reset_seconds and reset_seconds.isdigit():
+        _remaining = int(remaining)
+        _remaining_expires_at = time.monotonic() + int(reset_seconds)
 
     if response.status_code == 429:
         raise TcggoRateLimited("TCGGO daily request limit reached.")

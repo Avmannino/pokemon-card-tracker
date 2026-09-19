@@ -10,7 +10,7 @@ from . import db
 from .config import settings
 from .schemas import AddCollectionRequest, GradedValuesRequest
 from .services import poketrace, price_sync
-from .services.portfolio import build_dashboard
+from .services.portfolio import build_dashboard, value_change
 from .services.valuation import build_market_values
 
 
@@ -57,6 +57,10 @@ def serialize_collection_item(
         "card": card,
         "market_values": market_values,
         "owned_market_value_each": owned_estimate,
+        # Always the raw price's movement, whatever grade is owned: graded
+        # values are entered by hand or pulled sparsely, so they rarely have
+        # enough history to show a change.
+        "week_change": value_change(snapshots, "RAW"),
         "owned_market_value_total": (
             round(owned_estimate * quantity, 2)
             if owned_estimate is not None
@@ -176,6 +180,28 @@ def remove_from_collection(item_id: str) -> dict[str, bool]:
 @app.get("/api/refresh-status")
 def refresh_status() -> dict[str, Any]:
     return price_sync.get_status()
+
+
+@app.post("/api/refresh-now", status_code=202)
+async def refresh_now() -> dict[str, bool]:
+    """Manual "Refresh Prices": starts a real sync (raw + graded) in the
+    background; progress is reported by /api/refresh-status."""
+    try:
+        price_sync.start_manual_sync()
+    except price_sync.SyncBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except price_sync.SyncCooldown as exc:
+        minutes = -(-exc.retry_after // 60)
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Prices were synced recently. You can sync again in "
+                f"{minutes} min."
+            ),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+
+    return {"started": True}
 
 
 @app.post("/api/cards/{card_id}/graded-values")

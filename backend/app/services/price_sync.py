@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,32 @@ REQUEST_SPACING_SECONDS = 2.1
 # TCGGO's free plan is a hard 100 requests/day, and a card can cost two
 # requests (id lookup + prices) the first time it is seen.
 MAX_GRADED_CARDS_PER_PULL = 40
+
+# Refresh Prices runs a real sync, so repeated clicks are spaced out to keep
+# PokeTrace's 250/day and TCGGO's 100/day for the scheduled pulls.
+MANUAL_SYNC_COOLDOWN = timedelta(minutes=15)
+
+# One sync at a time, scheduled or manual; `_progress` is what the status
+# endpoint reports while it runs.
+_sync_lock = asyncio.Lock()
+_progress: dict[str, Any] = {
+    "running": False,
+    "kind": None,
+    "phase": None,
+    "done": 0,
+    "total": 0,
+}
+_background_tasks: set[asyncio.Task] = set()
+
+
+class SyncBusy(RuntimeError):
+    pass
+
+
+class SyncCooldown(RuntimeError):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(f"Sync is on cooldown for {retry_after}s.")
+        self.retry_after = retry_after
 
 
 def _now() -> datetime:
@@ -90,19 +117,116 @@ async def pull_card_raw_prices(card_id: str) -> int:
     return len(raw_sources)
 
 
+def _new_raw_record() -> dict[str, Any]:
+    return {
+        "attempted": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "skipped": 0,
+        "stopped_early": None,
+    }
+
+
+def _new_graded_record() -> dict[str, Any]:
+    return {
+        "attempted": 0,
+        "with_data": 0,
+        "failed": 0,
+        "skipped": 0,
+        "stopped_early": None,
+    }
+
+
+def _card_ids_for_pull(limit: int) -> tuple[list[str], int]:
+    """(card ids to pull, how many were left out by `limit`)."""
+    unique_card_ids = list(
+        dict.fromkeys(item["card_id"] for item in db.get_collection_items())
+    )
+    return unique_card_ids[:limit], max(0, len(unique_card_ids) - limit)
+
+
+@asynccontextmanager
+async def _syncing(kind: str):
+    async with _sync_lock:
+        _progress.update(running=True, kind=kind, phase="raw", done=0, total=0)
+
+        try:
+            yield
+        finally:
+            _progress.update(running=False, phase=None)
+
+
+async def _pull_raw(record: dict[str, Any]) -> None:
+    """Pulls raw prices for the collection, counting results into `record`."""
+    card_ids, record["skipped"] = _card_ids_for_pull(MAX_CARDS_PER_PULL)
+    _progress.update(phase="raw", done=0, total=len(card_ids))
+
+    for index, card_id in enumerate(card_ids):
+        record["attempted"] += 1
+
+        try:
+            await pull_card_raw_prices(card_id)
+            record["succeeded"] += 1
+        except poketrace.PokeTraceRateLimited as exc:
+            record["failed"] += 1
+            record["stopped_early"] = str(exc)
+            break
+        except Exception:
+            record["failed"] += 1
+            logger.exception("Price pull failed for card %s", card_id)
+
+        _progress["done"] = index + 1
+
+        if index < len(card_ids) - 1:
+            await asyncio.sleep(REQUEST_SPACING_SECONDS)
+
+
+async def _pull_graded(
+    record: dict[str, Any],
+    keep_in_reserve: bool = False,
+) -> None:
+    """Pulls graded prices for the collection, counting results into
+    `record`. With `keep_in_reserve`, stops once TCGGO's remaining requests
+    for the day would no longer cover a full scheduled pull."""
+    card_ids, record["skipped"] = _card_ids_for_pull(MAX_GRADED_CARDS_PER_PULL)
+    _progress.update(phase="graded", done=0, total=len(card_ids))
+
+    for index, card_id in enumerate(card_ids):
+        if keep_in_reserve:
+            remaining = tcggo.requests_remaining()
+            if remaining is not None and remaining <= len(card_ids):
+                record["stopped_early"] = (
+                    "Kept today's remaining TCGGO requests for the scheduled "
+                    "pulls."
+                )
+                break
+
+        record["attempted"] += 1
+
+        try:
+            card = db.get_card(card_id)
+            if card and await pull_card_graded_prices(card):
+                record["with_data"] += 1
+        except tcggo.TcggoRateLimited as exc:
+            record["failed"] += 1
+            record["stopped_early"] = str(exc)
+            break
+        except Exception:
+            record["failed"] += 1
+            logger.exception("Graded price pull failed for card %s", card_id)
+
+        _progress["done"] = index + 1
+
+
 async def sync_all_cards(slot: datetime) -> None:
-    # Keep the graded pull's own record ("graded") when rewriting this one.
+    # Keep the other records ("graded", "manual") when rewriting this one.
     state = _read_state() or {}
     state.update(
         {
             "slot": slot.isoformat(),
             "started_at": _now().isoformat(),
             "finished_at": None,
-            "attempted": 0,
-            "succeeded": 0,
-            "failed": 0,
-            "skipped": 0,
-            "stopped_early": None,
+            **_new_raw_record(),
         }
     )
 
@@ -110,28 +234,7 @@ async def sync_all_cards(slot: datetime) -> None:
     # pull for the same slot.
     _write_state(state)
 
-    unique_card_ids = list(
-        dict.fromkeys(item["card_id"] for item in db.get_collection_items())
-    )
-    card_ids = unique_card_ids[:MAX_CARDS_PER_PULL]
-    state["skipped"] = len(unique_card_ids) - len(card_ids)
-
-    for index, card_id in enumerate(card_ids):
-        state["attempted"] += 1
-
-        try:
-            await pull_card_raw_prices(card_id)
-            state["succeeded"] += 1
-        except poketrace.PokeTraceRateLimited as exc:
-            state["failed"] += 1
-            state["stopped_early"] = str(exc)
-            break
-        except Exception:
-            state["failed"] += 1
-            logger.exception("Price pull failed for card %s", card_id)
-
-        if index < len(card_ids) - 1:
-            await asyncio.sleep(REQUEST_SPACING_SECONDS)
+    await _pull_raw(state)
 
     state["finished_at"] = _now().isoformat()
     _write_state(state)
@@ -172,15 +275,11 @@ async def pull_card_graded_prices(card: dict[str, Any]) -> int:
 
 
 async def sync_graded_prices(slot: datetime) -> None:
-    graded: dict[str, Any] = {
+    graded = {
         "slot": slot.isoformat(),
         "started_at": _now().isoformat(),
         "finished_at": None,
-        "attempted": 0,
-        "with_data": 0,
-        "failed": 0,
-        "skipped": 0,
-        "stopped_early": None,
+        **_new_graded_record(),
     }
 
     # Recorded up front, like the raw pull, so it can run at most once per
@@ -189,26 +288,7 @@ async def sync_graded_prices(slot: datetime) -> None:
     state["graded"] = graded
     _write_state(state)
 
-    unique_card_ids = list(
-        dict.fromkeys(item["card_id"] for item in db.get_collection_items())
-    )
-    card_ids = unique_card_ids[:MAX_GRADED_CARDS_PER_PULL]
-    graded["skipped"] = len(unique_card_ids) - len(card_ids)
-
-    for card_id in card_ids:
-        graded["attempted"] += 1
-
-        try:
-            card = db.get_card(card_id)
-            if card and await pull_card_graded_prices(card):
-                graded["with_data"] += 1
-        except tcggo.TcggoRateLimited as exc:
-            graded["failed"] += 1
-            graded["stopped_early"] = str(exc)
-            break
-        except Exception:
-            graded["failed"] += 1
-            logger.exception("Graded price pull failed for card %s", card_id)
+    await _pull_graded(graded)
 
     graded["finished_at"] = _now().isoformat()
     state = _read_state() or {}
@@ -228,50 +308,142 @@ async def run_scheduler() -> None:
     the current slot's pull never happened, e.g. the backend was off.
 
     Raw prices (PokeTrace) and graded prices (TCGGO) are tracked separately,
-    each at most once per slot."""
+    each at most once per slot. Manual syncs never touch these slot records,
+    so they neither use up nor replace a scheduled pull."""
     while True:
         slot = current_slot(_now())
+        state = _read_state() or {}
 
-        try:
-            state = _read_state()
-            if not state or state.get("slot") != slot.isoformat():
-                await sync_all_cards(slot)
-        except Exception:
-            logger.exception("Scheduled price pull failed")
+        needs_raw = state.get("slot") != slot.isoformat()
+        needs_graded = (
+            tcggo.is_configured()
+            and (state.get("graded") or {}).get("slot") != slot.isoformat()
+        )
 
-        try:
-            state = _read_state() or {}
-            if (
-                tcggo.is_configured()
-                and (state.get("graded") or {}).get("slot") != slot.isoformat()
-            ):
-                await sync_graded_prices(slot)
-        except Exception:
-            logger.exception("Scheduled graded price pull failed")
+        if needs_raw or needs_graded:
+            async with _syncing("scheduled"):
+                if needs_raw:
+                    try:
+                        await sync_all_cards(slot)
+                    except Exception:
+                        logger.exception("Scheduled price pull failed")
+
+                if needs_graded:
+                    try:
+                        await sync_graded_prices(slot)
+                    except Exception:
+                        logger.exception("Scheduled graded price pull failed")
 
         wait = (next_slot(_now()) - _now()).total_seconds()
         await asyncio.sleep(max(wait, 0) + 1)
 
 
+def _manual_cooldown_remaining() -> int:
+    manual = (_read_state() or {}).get("manual")
+    if not manual:
+        return 0
+
+    elapsed = _now() - datetime.fromisoformat(manual["started_at"])
+    return max(0, int((MANUAL_SYNC_COOLDOWN - elapsed).total_seconds()) + 1)
+
+
+def start_manual_sync() -> None:
+    """Starts a full sync in the background (raw + graded). Raises SyncBusy
+    if one is already running and SyncCooldown if the last manual sync was
+    too recent."""
+    if _progress["running"] or _sync_lock.locked():
+        raise SyncBusy("A price sync is already running.")
+
+    remaining = _manual_cooldown_remaining()
+    if remaining > 0:
+        raise SyncCooldown(remaining)
+
+    # Claimed now, before the task gets to run, so a second click can't slip
+    # in between.
+    _progress.update(running=True, kind="manual", phase="raw", done=0, total=0)
+
+    task = asyncio.create_task(_manual_sync())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _manual_sync() -> None:
+    try:
+        async with _syncing("manual"):
+            record: dict[str, Any] = {
+                "started_at": _now().isoformat(),
+                "finished_at": None,
+                "error": None,
+                "raw": _new_raw_record(),
+                "graded": _new_graded_record(),
+            }
+
+            state = _read_state() or {}
+            state["manual"] = record
+            _write_state(state)
+
+            try:
+                await _pull_raw(record["raw"])
+
+                if tcggo.is_configured():
+                    await _pull_graded(record["graded"], keep_in_reserve=True)
+            except Exception as exc:
+                logger.exception("Manual price sync failed")
+                record["error"] = f"{type(exc).__name__}: {exc}"
+
+            record["finished_at"] = _now().isoformat()
+            state = _read_state() or {}
+            state["manual"] = record
+            _write_state(state)
+
+            logger.info(
+                "Manual sync finished: raw %s/%s, graded %s with data",
+                record["raw"]["succeeded"],
+                record["raw"]["attempted"],
+                record["graded"]["with_data"],
+            )
+    finally:
+        _progress.update(running=False, phase=None)
+
+
 def get_status() -> dict[str, Any]:
-    state = _read_state()
+    state = _read_state() or {}
+    manual = state.get("manual")
+
+    scheduled_at = state.get("started_at")
+    manual_at = manual["started_at"] if manual else None
+
+    manual_is_latest = bool(
+        manual_at
+        and (
+            not scheduled_at
+            or datetime.fromisoformat(manual_at)
+            > datetime.fromisoformat(scheduled_at)
+        )
+    )
+
+    if manual_is_latest:
+        last_pull_at = manual_at
+        last_result = {
+            **manual["raw"],
+            "failed": manual["raw"]["failed"] + manual["graded"]["failed"],
+        }
+    elif scheduled_at:
+        last_pull_at = scheduled_at
+        last_result = {
+            key: state[key] for key in _new_raw_record()
+        }
+    else:
+        last_pull_at = None
+        last_result = None
 
     return {
-        "last_pull_at": state["started_at"] if state else None,
-        "last_result": (
-            {
-                key: state[key]
-                for key in (
-                    "attempted",
-                    "succeeded",
-                    "failed",
-                    "skipped",
-                    "stopped_early",
-                )
-            }
-            if state
-            else None
-        ),
-        "graded": (state or {}).get("graded"),
+        "last_pull_at": last_pull_at,
+        "last_result": last_result,
+        "graded": state.get("graded"),
+        "manual": manual,
+        "syncing": _progress["running"],
+        "progress": dict(_progress) if _progress["running"] else None,
+        "manual_available_in": _manual_cooldown_remaining(),
         "next_pull_at": next_slot(_now()).isoformat(),
     }

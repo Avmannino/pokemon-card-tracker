@@ -58,6 +58,14 @@ export function getRefreshStatus() {
   return request("/api/refresh-status");
 }
 
+// Starts a real price sync in the background; poll getRefreshStatus() for
+// progress.
+export function startSync() {
+  return request("/api/refresh-now", {
+    method: "POST",
+  });
+}
+
 export function saveGradedValues(cardId, payload) {
   return request(`/api/cards/${cardId}/graded-values`, {
     method: "POST",
