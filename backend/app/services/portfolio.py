@@ -75,11 +75,22 @@ def _item_breakpoints(
 
 
 def _value_at(breakpoints: tuple[list[date], list[float]], day: date) -> float | None:
-    """Forward-filled per-card estimate as of `day` (None before the card's
-    first known value)."""
+    """Per-card estimate as of `day`, forward-filled from the last known
+    price.
+
+    Days before the card's first known price fall back to that first price
+    rather than counting as zero. The chart values the collection you hold
+    *now* at each day's market prices, so adding a card lifts the whole curve
+    instead of spiking on the day it was added, and day-to-day movement is
+    only ever price movement. A card with no price data at all stays None.
+    """
     dates, estimates = breakpoints
+
+    if not dates:
+        return None
+
     index = bisect.bisect_right(dates, day) - 1
-    return estimates[index] if index >= 0 else None
+    return estimates[max(index, 0)]
 
 
 def build_dashboard(
@@ -116,6 +127,17 @@ def build_dashboard(
     earliest = min(change_dates) if change_dates else today
     earliest = max(earliest, today - timedelta(days=MAX_HISTORY_DAYS))
     day_count = (today - earliest).days
+
+    # Before this date at least one held card is flat-lined at its first
+    # known price, because we have no market data from back then.
+    first_priced_days = [
+        entry["breakpoints"][0][0]
+        for entry in per_item
+        if entry["breakpoints"][0]
+    ]
+    full_history_since = (
+        max(first_priced_days).isoformat() if first_priced_days else None
+    )
 
     def total_at(day: date) -> float | None:
         total = 0.0
@@ -201,6 +223,7 @@ def build_dashboard(
 
     return {
         "current_total_value": current_total,
+        "full_history_since": full_history_since,
         "history": history,
         "performance": performance,
         "movers": movers,

@@ -439,6 +439,16 @@ h2 {
   margin-top: 10px;
 }
 
+.chart-note {
+  margin: 10px 2px 0;
+
+  color: #69758a;
+
+  font-size: 0.74rem;
+
+  line-height: 1.5;
+}
+
 .chart-svg-wrap svg {
   width: 100%;
   height: 220px;
@@ -991,9 +1001,15 @@ h2 {
 .collection-table {
   width: 100%;
 
-  min-width: 1180px;
+  min-width: 1240px;
 
   border-collapse: collapse;
+}
+
+.qty-cell {
+  color: #e9edf7;
+
+  font-variant-numeric: tabular-nums;
 }
 
 .collection-table th {

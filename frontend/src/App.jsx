@@ -593,6 +593,7 @@ function App() {
                   <th>PSA 9</th>
                   <th>PSA 10</th>
                   <th>You Own</th>
+                  <th>Qty</th>
                   <th>Your Value</th>
                   <th>Actions</th>
                 </tr>
@@ -655,11 +656,13 @@ function App() {
                             item.ownership_grade
                           )}
                         </strong>
-
-                        <span>
-                          Qty {item.quantity}
-                        </span>
                       </div>
+                    </td>
+
+                    <td>
+                      <strong className="qty-cell">
+                        {item.quantity}
+                      </strong>
                     </td>
 
                     <td>

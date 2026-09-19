@@ -265,6 +265,13 @@ function Dashboard({ refreshKey }) {
   }
 
   const latest = filteredHistory[filteredHistory.length - 1];
+  // The chart values the cards you hold now at each day's prices, so a card
+  // added recently is flat-lined before its first known price.
+  const partialBefore =
+    data.full_history_since &&
+    filteredHistory[0].date < data.full_history_since
+      ? data.full_history_since
+      : null;
   const activePoint =
     hoveredIndex !== null && filteredHistory[hoveredIndex]
       ? filteredHistory[hoveredIndex]
@@ -359,6 +366,14 @@ function Dashboard({ refreshKey }) {
             hoveredIndex={hoveredIndex}
             onHover={setHoveredIndex}
           />
+
+          {partialBefore && (
+            <p className="chart-note">
+              Values your current cards at each day&apos;s market prices.
+              Before {formatDate(partialBefore)}, cards added later are held
+              flat at their first known price.
+            </p>
+          )}
         </div>
 
         <aside className="top-cards-panel">
