@@ -54,16 +54,8 @@ export function deleteCollectionItem(itemId) {
   });
 }
 
-export function refreshCard(cardId) {
-  return request(`/api/cards/${cardId}/refresh`, {
-    method: "POST",
-  });
-}
-
-export function refreshAll() {
-  return request("/api/refresh-all", {
-    method: "POST",
-  });
+export function getRefreshStatus() {
+  return request("/api/refresh-status");
 }
 
 export function saveGradedValues(cardId, payload) {

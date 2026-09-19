@@ -13,6 +13,10 @@ class PokeTraceError(RuntimeError):
     pass
 
 
+class PokeTraceRateLimited(PokeTraceError):
+    pass
+
+
 def _headers() -> dict[str, str]:
     return {
         "X-API-Key": settings.poketrace_api_key,
@@ -30,7 +34,7 @@ async def _request(path: str, params: dict[str, Any] | None = None) -> dict[str,
         )
 
     if response.status_code == 429:
-        raise PokeTraceError(
+        raise PokeTraceRateLimited(
             "PokeTrace rate limit reached. Free accounts allow 250 requests/day."
         )
 

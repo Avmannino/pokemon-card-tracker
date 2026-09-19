@@ -4,8 +4,7 @@ import {
   addCollectionItem,
   deleteCollectionItem,
   getCollection,
-  refreshAll,
-  refreshCard,
+  getRefreshStatus,
   saveGradedValues,
   searchCards,
 } from "./api.js";
@@ -15,6 +14,31 @@ import { money, cardTitle } from "./format.js";
 
 const GRADES = ["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"];
 const SEARCH_PAGE_SIZE = 10;
+
+function pullTime(iso) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function refreshStatusText(status) {
+  if (!status) {
+    return "";
+  }
+
+  const last = status.last_pull_at
+    ? `Last market pull ${pullTime(status.last_pull_at)}`
+    : "No market pull yet";
+  const failed = status.last_result?.failed || 0;
+
+  return (
+    `${last}${failed ? ` (${failed} failed)` : ""}` +
+    ` · Next ${pullTime(status.next_pull_at)}`
+  );
+}
 
 function chunk(items, size) {
   const chunks = [];
@@ -74,8 +98,8 @@ function App() {
   const [loadingCollection, setLoadingCollection] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [busyCardId, setBusyCardId] = useState(null);
-  const [refreshingAll, setRefreshingAll] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState(null);
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
@@ -96,8 +120,17 @@ function App() {
     }
   }
 
+  async function loadRefreshStatus() {
+    try {
+      setRefreshStatus(await getRefreshStatus());
+    } catch {
+      // Status is informational only; the collection view still works.
+    }
+  }
+
   useEffect(() => {
     loadCollection();
+    loadRefreshStatus();
   }, []);
 
   const ownedTotal = useMemo(
@@ -160,7 +193,7 @@ function App() {
         notes: addForm.notes.trim() || null,
       };
 
-      const result = await addCollectionItem(payload);
+      await addCollectionItem(payload);
 
       setAddForm(emptyAddForm());
       setQuery("");
@@ -168,13 +201,9 @@ function App() {
       searchInputRef.current?.focus();
       await loadCollection();
 
-      if (result.refresh_error) {
-        setMessage(
-          `Card added. Raw pricing could not refresh yet: ${result.refresh_error}`
-        );
-      } else {
-        setMessage("Card added and raw market pricing refreshed.");
-      }
+      setMessage(
+        "Card added. Its price will appear after the next scheduled market pull."
+      );
     } catch (err) {
       setError(err.message);
     }
@@ -201,48 +230,18 @@ function App() {
     }
   }
 
-  async function handleRefresh(cardId) {
-    setBusyCardId(cardId);
+  // Re-reads what's already stored in our database; never calls PokeTrace.
+  async function handleReload() {
+    setReloading(true);
     setError("");
     setMessage("");
 
-    try {
-      await refreshCard(cardId);
-      await loadCollection();
-      setMessage("Raw market values refreshed.");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusyCardId(null);
-    }
-  }
+    await Promise.all([loadCollection(), loadRefreshStatus()]);
 
-  async function handleRefreshAll() {
-    setRefreshingAll(true);
-    setError("");
+    setReloading(false);
     setMessage(
-      "Refreshing cards at PokeTrace's free-account rate limit..."
+      "Reloaded stored prices. New market prices are only pulled on the twice-daily schedule."
     );
-
-    try {
-      const result = await refreshAll();
-      await loadCollection();
-
-      const failed = result.results.filter(
-        (row) => !row.ok
-      ).length;
-
-      setMessage(
-        `Refresh finished: ${result.attempted - failed} succeeded, ` +
-          `${failed} failed, ` +
-          `${result.skipped_due_to_daily_safety_limit} skipped.`
-      );
-    } catch (err) {
-      setError(err.message);
-      setMessage("");
-    } finally {
-      setRefreshingAll(false);
-    }
   }
 
   async function handleSavePsa(event) {
@@ -310,18 +309,18 @@ function App() {
             <h2>Search Pokémon cards</h2>
           </div>
 
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={handleRefreshAll}
-            disabled={
-              refreshingAll || collection.items.length === 0
-            }
-          >
-            {refreshingAll
-              ? "Refreshing…"
-              : "Refresh All Raw Prices"}
-          </button>
+          <div className="refresh-control">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleReload}
+              disabled={reloading}
+            >
+              {reloading ? "Refreshing…" : "Refresh Prices"}
+            </button>
+
+            <small>{refreshStatusText(refreshStatus)}</small>
+          </div>
         </div>
 
         <form
@@ -621,21 +620,6 @@ function App() {
                         <button
                           type="button"
                           className="text-button"
-                          disabled={
-                            busyCardId === item.card.id
-                          }
-                          onClick={() =>
-                            handleRefresh(item.card.id)
-                          }
-                        >
-                          {busyCardId === item.card.id
-                            ? "Refreshing…"
-                            : "Refresh raw"}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="text-button"
                           onClick={() =>
                             setPsaForm(
                               emptyPsaForm(item)
@@ -676,9 +660,9 @@ function App() {
             <strong>Raw</strong>
 
             <p>
-              Automatically refreshed from eBay raw sold
-              averages and TCGPlayer raw market data
-              returned by PokeTrace.
+              Pulled automatically twice a day (AM and PM)
+              from eBay raw sold averages and TCGPlayer raw
+              market data returned by PokeTrace.
             </p>
           </article>
 

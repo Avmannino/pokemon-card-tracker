@@ -11,14 +11,13 @@ A free-first personal Pokémon card collection tracker built with:
 
 - Search Pokémon cards.
 - Add raw or PSA 7/8/9/10 copies to your collection.
-- Automatically refresh raw pricing from:
+- Pull raw pricing automatically twice a day (once AM, once PM) from:
   - eBay raw sold-sale averages returned by PokeTrace.
   - TCGPlayer raw market data returned by PokeTrace.
-- Store every price refresh as a historical snapshot.
+- Store every price pull as a historical snapshot.
 - Calculate a current market estimate from the newest value from each source.
 - Manually add PSA 7–10 values from legitimate public comps without scraping.
 - Calculate your known collection value from the grade you actually own.
-- Refresh one card or your entire collection.
 
 ## Important free-tier limitation
 
@@ -122,7 +121,7 @@ POKETRACE_API_KEY=pc_...
 ```
 
 The Free plan has a daily request limit and a burst rate limit. The project's
-Refresh All endpoint deliberately waits between requests.
+scheduled price pull deliberately waits between requests.
 
 ---
 
@@ -317,54 +316,40 @@ The app will calculate the median of the newest value from each source.
 
 ---
 
-# 9. Refresh prices
+# 9. How prices refresh
 
-## One card
+Market prices are pulled from PokeTrace **twice a day** — once in the AM and
+once in the PM — by a scheduler that runs inside the FastAPI backend
+(`backend/app/services/price_sync.py`). Nothing else pulls prices: the
+**Refresh Prices** button only re-reads what is already stored in your
+database, and adding a card does not trigger a pull (its price appears at the
+next scheduled pull).
 
-Click:
-
-```text
-Refresh raw
-```
-
-beside a collection card.
-
-## Entire collection
-
-Click:
+Default times are 8:00 AM and 8:00 PM (server-local). Change them in
+`backend/.env`:
 
 ```text
-Refresh All Raw Prices
+REFRESH_AM_TIME=08:00
+REFRESH_PM_TIME=20:00
 ```
 
-The backend waits 2.1 seconds between PokeTrace calls so the free burst limit
-is respected.
+Details:
 
-The endpoint also caps a single full refresh at 220 unique cards so you do not
-accidentally consume the entire 250-request daily free allowance.
+- The pull runs only while the backend is running. If the backend was off at
+  a scheduled time, it catches up once on startup, then resumes the schedule.
+- Which slot last ran is saved in `backend/.price_sync_state.json`, so
+  restarts (including `uvicorn --reload`) never trigger a second pull for the
+  same slot.
+- A failed pull is not retried until the next slot. If PokeTrace reports a
+  rate limit, the pull stops immediately instead of spending more requests.
+- The pull waits 2.1 seconds between calls (free burst limit) and is capped at
+  100 unique cards per pull so two pulls stay under the 250-request daily
+  allowance.
+- Searching is still live: each search is one PokeTrace request.
 
 ---
 
-# 10. Refresh from a command
-
-Keep the FastAPI backend running.
-
-From the project root, with the Python virtual environment active:
-
-```powershell
-python .\backend\scripts\refresh_all.py
-```
-
-Optional alternate backend URL:
-
-```powershell
-$env:CARD_TRACKER_API_URL="http://localhost:8000"
-python .\backend\scripts\refresh_all.py
-```
-
----
-
-# 11. How the valuation works
+# 10. How the valuation works
 
 For each grade, the app looks at the newest saved value from each source.
 
@@ -400,7 +385,7 @@ weight merely because it was refreshed more often.
 
 ---
 
-# 12. Current project structure
+# 11. Current project structure
 
 ```text
 pokemon-card-tracker/
@@ -420,9 +405,9 @@ pokemon-card-tracker/
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── poketrace.py
+│   │       ├── portfolio.py
+│   │       ├── price_sync.py
 │   │       └── valuation.py
-│   └── scripts/
-│       └── refresh_all.py
 └── frontend/
     ├── .env.example
     ├── index.html
@@ -437,7 +422,7 @@ pokemon-card-tracker/
 
 ---
 
-# 13. Security notes
+# 12. Security notes
 
 - Never commit `backend/.env`.
 - Never put `SUPABASE_SECRET_KEY` in a Vite variable.
@@ -448,7 +433,7 @@ pokemon-card-tracker/
 
 ---
 
-# 14. What I would build next
+# 13. What I would build next
 
 The next version should add:
 
@@ -458,6 +443,5 @@ The next version should add:
 - collection sorting/filtering
 - exact card-variant confirmation
 - CSV import/export
-- automatic scheduled refresh after the app is deployed
 - additional free/authorized pricing adapters
 - sports-card support using the same collection and snapshot model

@@ -1,10 +1,22 @@
 import os
+from datetime import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(ENV_PATH)
+
+
+def _clock_time(name: str, default: str) -> time:
+    raw = os.getenv(name, default).strip()
+
+    try:
+        return time.fromisoformat(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{name} must look like HH:MM (24-hour), got {raw!r}."
+        ) from exc
 
 
 class Settings:
@@ -16,6 +28,11 @@ class Settings:
             "FRONTEND_ORIGIN",
             "http://localhost:5173",
         ).strip()
+
+        # The only two times of day (server-local) that prices are pulled
+        # from PokeTrace.
+        self.refresh_am_time = _clock_time("REFRESH_AM_TIME", "08:00")
+        self.refresh_pm_time = _clock_time("REFRESH_PM_TIME", "20:00")
 
         missing = []
         if not self.supabase_url:

@@ -22,3 +22,6 @@ Thumbs.db
 
 # Local tool config
 .claude/
+
+# Scheduler state (which AM/PM slot last pulled)
+backend/.price_sync_state.json

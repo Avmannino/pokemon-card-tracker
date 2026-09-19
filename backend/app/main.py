@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -7,14 +8,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db
 from .config import settings
 from .schemas import AddCollectionRequest, GradedValuesRequest
-from .services import poketrace
+from .services import poketrace, price_sync
 from .services.portfolio import build_dashboard
 from .services.valuation import build_market_values
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    scheduler = asyncio.create_task(price_sync.run_scheduler())
+
+    try:
+        yield
+    finally:
+        scheduler.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler
 
 
 app = FastAPI(
     title="Pokemon Card Tracker API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -47,42 +61,6 @@ def serialize_collection_item(
             if owned_estimate is not None
             else None
         ),
-    }
-
-
-async def refresh_card_raw_prices(card_id: str) -> dict[str, Any]:
-    card = db.get_card(card_id)
-    if not card:
-        raise HTTPException(status_code=404, detail="Card not found.")
-
-    try:
-        remote_card = await poketrace.get_card(card["poketrace_id"])
-        raw_sources = poketrace.extract_raw_sources(remote_card)
-    except poketrace.PokeTraceError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    saved = []
-    for raw_source in raw_sources:
-        snapshot = db.insert_price_snapshot(
-            card_id=card_id,
-            grade="RAW",
-            source=raw_source["source"],
-            value=raw_source["value"],
-            source_url=raw_source.get("source_url"),
-            observed_at=raw_source.get("observed_at"),
-            metadata=raw_source.get("metadata"),
-        )
-        saved.append(snapshot)
-
-    # Update mutable catalog information too.
-    normalized = poketrace.normalize_card(remote_card)
-    normalized["poketrace_id"] = card["poketrace_id"]
-    db.save_card(normalized)
-
-    snapshots = db.get_price_snapshots(card_id)
-    return {
-        "saved_sources": len(saved),
-        "market_values": build_market_values(snapshots),
     }
 
 
@@ -155,7 +133,7 @@ def portfolio_dashboard() -> dict[str, Any]:
 
 
 @app.post("/api/collection")
-async def add_to_collection(
+def add_to_collection(
     request: AddCollectionRequest,
 ) -> dict[str, Any]:
     card = db.save_card(request.card.model_dump())
@@ -167,22 +145,10 @@ async def add_to_collection(
         notes=request.notes,
     )
 
-    # Get raw market pricing immediately. If the pricing provider is temporarily
-    # unavailable, keep the collection item and return it rather than losing the
-    # user's work.
-    refresh_error = None
-    try:
-        await refresh_card_raw_prices(card["id"])
-    except HTTPException as exc:
-        refresh_error = exc.detail
-
-    card = db.get_card(card["id"])
-    response_item = serialize_collection_item(item, card)
-
-    return {
-        "item": response_item,
-        "refresh_error": refresh_error,
-    }
+    # No price pull here: prices only come from PokeTrace on the twice-daily
+    # schedule (services/price_sync.py), so a new card shows no value until
+    # the next pull.
+    return {"item": serialize_collection_item(item, card)}
 
 
 @app.delete("/api/collection/{item_id}")
@@ -191,60 +157,9 @@ def remove_from_collection(item_id: str) -> dict[str, bool]:
     return {"deleted": True}
 
 
-@app.post("/api/cards/{card_id}/refresh")
-async def refresh_card(card_id: str) -> dict[str, Any]:
-    return await refresh_card_raw_prices(card_id)
-
-
-@app.post("/api/refresh-all")
-async def refresh_all() -> dict[str, Any]:
-    items = db.get_collection_items()
-
-    unique_card_ids = []
-    seen = set()
-    for item in items:
-        card_id = item["card_id"]
-        if card_id not in seen:
-            seen.add(card_id)
-            unique_card_ids.append(card_id)
-
-    # Leave a little room under PokeTrace's 250/day Free limit for searches
-    # and manual refreshes.
-    max_cards = 220
-    card_ids = unique_card_ids[:max_cards]
-
-    results = []
-    for index, card_id in enumerate(card_ids):
-        try:
-            data = await refresh_card_raw_prices(card_id)
-            results.append(
-                {
-                    "card_id": card_id,
-                    "ok": True,
-                    "saved_sources": data["saved_sources"],
-                }
-            )
-        except HTTPException as exc:
-            results.append(
-                {
-                    "card_id": card_id,
-                    "ok": False,
-                    "error": str(exc.detail),
-                }
-            )
-
-        # Free PokeTrace burst limit is 1 request / 2 seconds.
-        if index < len(card_ids) - 1:
-            await asyncio.sleep(2.1)
-
-    return {
-        "attempted": len(card_ids),
-        "skipped_due_to_daily_safety_limit": max(
-            0,
-            len(unique_card_ids) - max_cards,
-        ),
-        "results": results,
-    }
+@app.get("/api/refresh-status")
+def refresh_status() -> dict[str, Any]:
+    return price_sync.get_status()
 
 
 @app.post("/api/cards/{card_id}/graded-values")
