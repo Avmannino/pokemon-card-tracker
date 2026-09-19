@@ -87,7 +87,6 @@ button:disabled {
 .portfolio-card,
 .search-panel,
 .collection-panel,
-.method-panel,
 .dashboard-panel {
   border: 1px solid #222a3a;
   background: rgba(16, 21, 31, 0.94);
@@ -195,7 +194,6 @@ h2 {
 
 .search-panel,
 .collection-panel,
-.method-panel,
 .dashboard-panel {
   padding: 26px;
 
@@ -1303,44 +1301,9 @@ h2 {
   text-align: center;
 }
 
-.method-grid {
-  display: grid;
 
-  grid-template-columns:
-    repeat(
-      3,
-      1fr
-    );
 
-  gap: 12px;
 
-  margin-top: 18px;
-}
-
-.method-grid article {
-  padding: 16px;
-
-  border:
-    1px solid #252d3c;
-
-  border-radius: 14px;
-
-  background: #0d121b;
-}
-
-.method-grid article > strong {
-  color: #f0f4ff;
-}
-
-.method-grid p {
-  margin: 6px 0 0;
-
-  color: #747f93;
-
-  font-size: 0.85rem;
-
-  line-height: 1.55;
-}
 
 .thumb-clickable {
   cursor: zoom-in;
@@ -1625,8 +1588,7 @@ h2 {
       1fr;
   }
 
-  .search-results,
-  .method-grid {
+  .search-results {
     grid-template-columns:
       1fr;
   }
@@ -1656,7 +1618,6 @@ h2 {
   .portfolio-card,
   .search-panel,
   .collection-panel,
-  .method-panel,
   .dashboard-panel {
     border-radius: 16px;
   }
@@ -1664,7 +1625,6 @@ h2 {
   .hero > div:first-child,
   .search-panel,
   .collection-panel,
-  .method-panel,
   .dashboard-panel {
     padding: 18px;
   }

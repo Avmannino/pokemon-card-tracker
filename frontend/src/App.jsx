@@ -823,46 +823,6 @@ function App() {
           )}
       </section>
 
-      <section className="method-panel">
-        <p className="eyebrow">
-          HOW VALUES WORK
-        </p>
-
-        <h2>Free-data valuation method</h2>
-
-        <div className="method-grid">
-          <article>
-            <strong>Raw</strong>
-
-            <p>
-              Pulled automatically twice a day (AM and PM)
-              from eBay raw sold averages and TCGPlayer raw
-              market data returned by PokeTrace.
-            </p>
-          </article>
-
-          <article>
-            <strong>PSA 7–10</strong>
-
-            <p>
-              Stored as independent source snapshots. For
-              now, enter legitimate public comps manually
-              without scraping restricted sites.
-            </p>
-          </article>
-
-          <article>
-            <strong>General value</strong>
-
-            <p>
-              The app uses the median of each source&apos;s
-              newest value so one source cannot overpower
-              the estimate by being refreshed more often.
-            </p>
-          </article>
-        </div>
-      </section>
-
       {addForm.card && (
         <div className="modal-backdrop">
           <form
