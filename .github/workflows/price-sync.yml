@@ -1,0 +1,122 @@
+name: Pokemon Price Sync
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "7 8 * * *"
+      timezone: "America/New_York"
+
+    - cron: "7 20 * * *"
+      timezone: "America/New_York"
+
+concurrency:
+  group: pokemon-price-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      BACKEND_URL: ${{ vars.BACKEND_URL }}
+
+    steps:
+      - name: Wake Render backend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Waking backend at $BACKEND_URL..."
+
+          for attempt in {1..30}; do
+            RESPONSE="$(curl -fsS --max-time 30 "$BACKEND_URL/health" || true)"
+
+            if echo "$RESPONSE" | grep -q '"status":"ok"'; then
+              echo "Backend is awake and healthy."
+              exit 0
+            fi
+
+            echo "Waiting for Render to wake... attempt $attempt/30"
+            sleep 10
+          done
+
+          echo "Backend did not become healthy."
+          exit 1
+
+      - name: Start price sync
+        id: start_sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RESPONSE_FILE="$(mktemp)"
+
+          HTTP_STATUS="$(
+            curl \
+              -sS \
+              -o "$RESPONSE_FILE" \
+              -w "%{http_code}" \
+              -X POST \
+              "$BACKEND_URL/api/refresh-now"
+          )"
+
+          echo "Refresh endpoint returned HTTP $HTTP_STATUS"
+          cat "$RESPONSE_FILE"
+          echo
+
+          if [ "$HTTP_STATUS" = "202" ]; then
+            echo "Price sync started."
+            echo "monitor=true" >> "$GITHUB_OUTPUT"
+
+          elif [ "$HTTP_STATUS" = "409" ]; then
+            echo "A price sync is already running. Monitoring existing sync."
+            echo "monitor=true" >> "$GITHUB_OUTPUT"
+
+          elif [ "$HTTP_STATUS" = "429" ]; then
+            echo "Refresh cooldown is active. No additional sync needed."
+            echo "monitor=false" >> "$GITHUB_OUTPUT"
+
+          else
+            echo "Unexpected response from refresh endpoint."
+            exit 1
+          fi
+
+      - name: Keep Render awake until sync finishes
+        if: steps.start_sync.outputs.monitor == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..80}; do
+            BODY="$(
+              curl \
+                -fsS \
+                --max-time 30 \
+                "$BACKEND_URL/api/refresh-status"
+            )"
+
+            echo "$BODY"
+
+            SYNCING="$(
+              python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+          print("true" if data.get("syncing") else "false")
+          ' <<< "$BODY"
+            )"
+
+            if [ "$SYNCING" = "false" ]; then
+              echo "Price sync finished successfully."
+              exit 0
+            fi
+
+            echo "Price sync still running... check $attempt/80"
+            sleep 30
+          done
+
+          echo "Timed out waiting for price sync to finish."
+          exit 1
