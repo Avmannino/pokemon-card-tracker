@@ -206,7 +206,7 @@ h2 {
   margin-bottom: 20px;
 }
 
-.movers-row {
+.performance-row {
   display: grid;
 
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -216,16 +216,16 @@ h2 {
   margin-bottom: 20px;
 }
 
-.mover-card {
+.performance-card {
   display: flex;
 
   flex-direction: column;
 
-  gap: 10px;
+  gap: 6px;
 
   min-width: 0;
 
-  padding: 14px;
+  padding: 16px;
 
   border: 1px solid #252d3c;
 
@@ -239,7 +239,7 @@ h2 {
     );
 }
 
-.mover-window {
+.performance-window {
   color: #737f93;
 
   font-size: 0.72rem;
@@ -250,34 +250,101 @@ h2 {
   text-transform: uppercase;
 }
 
-.mover-empty {
-  color: #596378;
+.performance-change {
+  color: #f0f4ff;
 
-  font-size: 0.82rem;
+  font-size: 1.35rem;
+
+  letter-spacing: -0.03em;
 }
 
-.mover-card-identity {
+.performance-pct {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.positive {
+  color: #5fe3a4;
+}
+
+.negative {
+  color: #f18a8a;
+}
+
+.muted {
+  color: #596378;
+}
+
+.movers-panel {
+  margin-top: 20px;
+
+  padding: 22px;
+
+  border: 1px solid #252d3c;
+
+  border-radius: 18px;
+
+  background: #0d121b;
+}
+
+.movers-panel h3 {
+  margin: 0 0 16px;
+
+  color: #f7f9ff;
+
+  font-size: 1.05rem;
+
+  letter-spacing: -0.02em;
+}
+
+.movers-grid {
+  display: grid;
+
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  gap: 12px;
+}
+
+.mover-entry {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 12px;
+
+  min-width: 0;
+
+  padding: 14px;
+
+  border: 1px solid #222a38;
+
+  border-radius: 14px;
+
+  background: #10151f;
+}
+
+.mover-identity {
   display: flex;
 
   min-width: 0;
 
-  gap: 10px;
+  gap: 11px;
 
   align-items: center;
 }
 
-.mover-card-identity img {
-  width: 34px;
-  height: 47px;
+.mover-identity img {
+  width: 42px;
+  height: 58px;
 
   flex-shrink: 0;
 
-  border-radius: 5px;
+  border-radius: 6px;
 
   object-fit: cover;
 }
 
-.mover-card-identity div {
+.mover-identity div {
   display: flex;
 
   min-width: 0;
@@ -287,19 +354,19 @@ h2 {
   gap: 2px;
 }
 
-.mover-card-identity strong {
+.mover-identity strong {
   overflow: hidden;
 
   color: #f0f4ff;
 
-  font-size: 0.86rem;
+  font-size: 0.88rem;
 
   text-overflow: ellipsis;
 
   white-space: nowrap;
 }
 
-.mover-card-identity span {
+.mover-identity span {
   overflow: hidden;
 
   color: #717d91;
@@ -309,6 +376,47 @@ h2 {
   text-overflow: ellipsis;
 
   white-space: nowrap;
+}
+
+.mover-value {
+  color: #8fb0ff !important;
+
+  font-weight: 700;
+}
+
+.mover-changes {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 6px;
+
+  padding-top: 11px;
+
+  border-top: 1px solid #1c232f;
+}
+
+.mover-change-row {
+  display: flex;
+
+  gap: 10px;
+
+  align-items: baseline;
+
+  justify-content: space-between;
+
+  font-size: 0.82rem;
+}
+
+.mover-change-label {
+  color: #737f93;
+
+  font-size: 0.72rem;
+  font-weight: 800;
+
+  letter-spacing: 0.05em;
+
+  text-transform: uppercase;
 }
 
 .change-badge {
@@ -1523,7 +1631,8 @@ h2 {
       1fr;
   }
 
-  .movers-row {
+  .performance-row,
+  .movers-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1560,12 +1669,14 @@ h2 {
     padding: 18px;
   }
 
-  .movers-row {
+  .performance-row,
+  .movers-grid {
     grid-template-columns: 1fr;
   }
 
   .chart-card,
-  .top-cards-panel {
+  .top-cards-panel,
+  .movers-panel {
     padding: 16px;
   }
 

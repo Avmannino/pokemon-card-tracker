@@ -10,13 +10,19 @@ from .valuation import build_market_values
 # anyone who has been tracking for less than a year.
 MAX_HISTORY_DAYS = 365
 
-# Windows shown as "biggest mover" cards, in (label, days-back) form.
+# Windows the portfolio-level change is reported over, in (label, days-back)
+# form.
 MOVER_WINDOWS = [
     ("1D", 1),
     ("1W", 7),
     ("1M", 30),
     ("3M", 90),
 ]
+
+# Each biggest-mover entry reports its change over these windows.
+MOVER_CARD_WINDOWS = ("1W", "1M")
+
+TOP_MOVER_COUNT = 3
 
 
 def _parse_observed_at(value: str) -> datetime:
@@ -159,11 +165,9 @@ def build_dashboard(
     current_total = total_at(today)
 
     performance: dict[str, Any] = {}
-    movers: dict[str, Any] = {}
 
     for label, days_back in MOVER_WINDOWS:
-        cutoff_day = today - timedelta(days=days_back)
-        past_total = total_at(cutoff_day)
+        past_total = total_at(today - timedelta(days=days_back))
 
         change = None
         change_pct = None
@@ -178,33 +182,54 @@ def build_dashboard(
             "change_pct": change_pct,
         }
 
-        best = None
-        for entry in per_item:
-            now_value = _value_at(entry["breakpoints"], today)
-            past_value = _value_at(entry["breakpoints"], cutoff_day)
+    window_days = dict(MOVER_WINDOWS)
+    ranked = []
 
-            if now_value is None or past_value is None:
-                continue
+    for entry in per_item:
+        now_value = _value_at(entry["breakpoints"], today)
+        if now_value is None:
+            continue
 
-            item_change = round((now_value - past_value) * entry["quantity"], 2)
-            if item_change == 0:
-                continue
-
-            item_change_pct = (
-                round(((now_value - past_value) / past_value) * 100, 2)
-                if past_value
-                else None
+        changes: dict[str, Any] = {}
+        for label in MOVER_CARD_WINDOWS:
+            past_value = _value_at(
+                entry["breakpoints"],
+                today - timedelta(days=window_days[label]),
             )
+            if past_value is None:
+                continue
 
-            if best is None or abs(item_change) > abs(best["change"]):
-                best = {
+            changes[label] = {
+                "change": round((now_value - past_value) * entry["quantity"], 2),
+                "change_pct": (
+                    round(((now_value - past_value) / past_value) * 100, 2)
+                    if past_value
+                    else None
+                ),
+            }
+
+        # Ranked by the largest move in either reported window, so a card that
+        # jumped this week and one that drifted all month both surface.
+        magnitude = max(
+            (abs(window["change"]) for window in changes.values()),
+            default=0.0,
+        )
+        if magnitude == 0:
+            continue
+
+        ranked.append(
+            (
+                magnitude,
+                {
                     "card": entry["card"],
-                    "change": item_change,
-                    "change_pct": item_change_pct,
                     "current_value": round(now_value * entry["quantity"], 2),
-                }
+                    "changes": changes,
+                },
+            )
+        )
 
-        movers[label] = best
+    ranked.sort(key=lambda row: row[0], reverse=True)
+    top_movers = [row for _, row in ranked[:TOP_MOVER_COUNT]]
 
     top_cards = []
     for entry in per_item:
@@ -226,6 +251,6 @@ def build_dashboard(
         "full_history_since": full_history_since,
         "history": history,
         "performance": performance,
-        "movers": movers,
+        "top_movers": top_movers,
         "top_cards": top_cards[:5],
     }

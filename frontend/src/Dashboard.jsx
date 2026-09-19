@@ -11,12 +11,27 @@ const CHART_RANGES = [
   { key: "ALL", label: "All", days: null },
 ];
 
-const MOVER_WINDOWS = [
+// Portfolio-level value change.
+const PERFORMANCE_WINDOWS = [
   { key: "1D", label: "Past Day" },
   { key: "1W", label: "Past Week" },
   { key: "1M", label: "Past Month" },
   { key: "3M", label: "Past 3 Months" },
 ];
+
+// Reported on each biggest-mover entry.
+const MOVER_CARD_WINDOWS = [
+  { key: "1W", label: "Week" },
+  { key: "1M", label: "Month" },
+];
+
+function signedMoney(value) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
+}
 
 function formatDate(value) {
   return new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", {
@@ -284,38 +299,28 @@ function Dashboard({ refreshKey }) {
         <h2>Portfolio performance</h2>
       </div>
 
-      <div className="movers-row">
-        {MOVER_WINDOWS.map(({ key, label }) => {
-          const mover = data.movers[key];
+      <div className="performance-row">
+        {PERFORMANCE_WINDOWS.map(({ key, label }) => {
+          const window = data.performance?.[key] || {};
+          const missing =
+            window.change === null || window.change === undefined;
+          const tone = window.change >= 0 ? "positive" : "negative";
 
           return (
-            <article className="mover-card" key={key}>
-              <span className="mover-window">{label}</span>
+            <article className="performance-card" key={key}>
+              <span className="performance-window">{label}</span>
 
-              {!mover ? (
-                <div className="mover-empty">Not enough data yet</div>
+              {missing ? (
+                <strong className="performance-change muted">—</strong>
               ) : (
                 <>
-                  <div className="mover-card-identity">
-                    {mover.card.image_url && (
-                      <img
-                        className="thumb-clickable"
-                        src={mover.card.image_url}
-                        alt={cardTitle(mover.card)}
-                        onClick={() => openZoom(mover.card)}
-                      />
-                    )}
+                  <strong className={`performance-change ${tone}`}>
+                    {signedMoney(window.change)}
+                  </strong>
 
-                    <div>
-                      <strong>{cardTitle(mover.card)}</strong>
-                      <span>{mover.card.set_name || "Unknown set"}</span>
-                    </div>
-                  </div>
-
-                  <ChangeBadge
-                    change={mover.change}
-                    changePct={mover.change_pct}
-                  />
+                  <span className={`performance-pct ${tone}`}>
+                    {percent(window.change_pct)}
+                  </span>
                 </>
               )}
             </article>
@@ -411,6 +416,68 @@ function Dashboard({ refreshKey }) {
           )}
         </aside>
       </div>
+
+      <section className="movers-panel">
+        <p className="eyebrow">BIGGEST MOVERS</p>
+        <h3>Largest price changes</h3>
+
+        {(data.top_movers || []).length === 0 ? (
+          <div className="empty-state small">
+            Not enough price history yet.
+          </div>
+        ) : (
+          <div className="movers-grid">
+            {data.top_movers.map((mover, index) => (
+              <article
+                className="mover-entry"
+                key={`${mover.card.id}-${index}`}
+              >
+                <div className="mover-identity">
+                  {mover.card.image_url && (
+                    <img
+                      className="thumb-clickable"
+                      src={mover.card.image_url}
+                      alt={cardTitle(mover.card)}
+                      onClick={() => openZoom(mover.card)}
+                    />
+                  )}
+
+                  <div>
+                    <strong>{cardTitle(mover.card)}</strong>
+                    <span>{mover.card.set_name || "Unknown set"}</span>
+                    <span className="mover-value">
+                      {money(mover.current_value)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mover-changes">
+                  {MOVER_CARD_WINDOWS.map(({ key, label }) => {
+                    const change = mover.changes?.[key];
+                    const tone =
+                      change && change.change >= 0 ? "positive" : "negative";
+
+                    return (
+                      <div className="mover-change-row" key={key}>
+                        <span className="mover-change-label">{label}</span>
+
+                        {change ? (
+                          <span className={tone}>
+                            <strong>{signedMoney(change.change)}</strong>{" "}
+                            {percent(change.change_pct)}
+                          </span>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       <CardZoomModal card={zoomedCard} onClose={closeZoom} />
     </section>
