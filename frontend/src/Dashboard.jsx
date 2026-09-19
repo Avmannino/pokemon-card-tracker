@@ -131,6 +131,9 @@ function LineChart({ points, hoveredIndex, onHover }) {
 
         {areaPath && <path d={areaPath} fill={`url(#${fillId})`} stroke="none" />}
 
+        {/* The chart stretches to fill its card, so strokes are non-scaling
+            and dots are zero-length round-capped lines (a <circle> would
+            squash into an ellipse). */}
         {coords.length > 1 ? (
           <path
             d={linePath}
@@ -139,9 +142,19 @@ function LineChart({ points, hoveredIndex, onHover }) {
             strokeWidth="2.5"
             strokeLinejoin="round"
             strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
           />
         ) : (
-          <circle cx={coords[0].x} cy={coords[0].y} r="4" fill={stroke} />
+          <line
+            x1={coords[0].x}
+            x2={coords[0].x}
+            y1={coords[0].y}
+            y2={coords[0].y}
+            stroke={stroke}
+            strokeWidth="8"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
         )}
 
         {hovered && (
@@ -152,15 +165,29 @@ function LineChart({ points, hoveredIndex, onHover }) {
               y1={padY}
               y2={height - padY}
               stroke="rgba(255,255,255,0.18)"
+              vectorEffect="non-scaling-stroke"
             />
 
-            <circle
-              cx={hovered.x}
-              cy={hovered.y}
-              r="4.5"
-              fill="#0b0f17"
+            <line
+              x1={hovered.x}
+              x2={hovered.x}
+              y1={hovered.y}
+              y2={hovered.y}
               stroke={stroke}
-              strokeWidth="2"
+              strokeWidth="11"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+
+            <line
+              x1={hovered.x}
+              x2={hovered.x}
+              y1={hovered.y}
+              y2={hovered.y}
+              stroke="#0b0f17"
+              strokeWidth="6"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
             />
           </>
         )}
@@ -374,9 +401,8 @@ function Dashboard({ refreshKey }) {
 
           {partialBefore && (
             <p className="chart-note">
-              Values your current cards at each day&apos;s market prices.
-              Before {formatDate(partialBefore)}, cards added later are held
-              flat at their first known price.
+              Current cards at each day&apos;s market prices; cards added
+              later are held flat before {formatDate(partialBefore)}.
             </p>
           )}
         </div>

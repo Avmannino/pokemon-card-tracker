@@ -449,6 +449,10 @@ h2 {
 }
 
 .chart-card {
+  display: flex;
+
+  flex-direction: column;
+
   min-width: 0;
 
   padding: 22px;
@@ -541,12 +545,22 @@ h2 {
   color: #ffffff;
 }
 
+/* The chart grows to fill whatever height the card gets stretched to by
+   the taller Top Cards panel beside it, instead of leaving blank space. */
 .chart-svg-wrap {
+  position: relative;
+
+  flex: 1 1 auto;
+
+  min-height: 220px;
+
   margin-top: 10px;
 }
 
 .chart-note {
-  margin: 10px 2px 0;
+  flex-shrink: 0;
+
+  margin: 8px 2px 0;
 
   color: #69758a;
 
@@ -556,8 +570,12 @@ h2 {
 }
 
 .chart-svg-wrap svg {
+  position: absolute;
+
+  inset: 0;
+
   width: 100%;
-  height: 220px;
+  height: 100%;
 
   display: block;
 

@@ -384,9 +384,8 @@ function App() {
     <main className="app-shell">
       <section className="hero">
         <div>
-          <p className="eyebrow">PERSONAL COLLECTION</p>
 
-          <h1>Pokémon Card Market Tracker</h1>
+          <h1>Pokémon Card Market Dashboard</h1>
 
           <p className="hero-copy">
             Track your collection, compare raw and PSA values,
