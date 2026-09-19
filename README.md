@@ -318,9 +318,18 @@ The app will calculate the median of the newest value from each source.
 
 # 9. How prices refresh
 
-Market prices are pulled from PokeTrace **twice a day** — once in the AM and
-once in the PM — by a scheduler that runs inside the FastAPI backend
-(`backend/app/services/price_sync.py`). Nothing else pulls prices: the
+Market prices are pulled **twice a day** — once in the AM and once in the PM —
+by a scheduler that runs inside the FastAPI backend
+(`backend/app/services/price_sync.py`):
+
+- **Raw** prices come from PokeTrace.
+- **Graded** (PSA 7–10) prices come from TCGGO's eBay sold medians, and are
+  only pulled when `RAPIDAPI_KEY` is set in `backend/.env`. Each value is the
+  median of up to the last 5 eBay sales for that grade, in USD. Cards with no
+  recent graded sales get nothing, so manual PSA entry still matters.
+
+Each source is tracked separately and runs at most once per slot. Nothing
+else pulls prices: the
 **Refresh Prices** button only re-reads what is already stored in your
 database, and adding a card does not trigger a pull (its price appears at the
 next scheduled pull).
@@ -342,9 +351,13 @@ Details:
   same slot.
 - A failed pull is not retried until the next slot. If PokeTrace reports a
   rate limit, the pull stops immediately instead of spending more requests.
-- The pull waits 2.1 seconds between calls (free burst limit) and is capped at
-  100 unique cards per pull so two pulls stay under the 250-request daily
-  allowance.
+- The raw pull waits 2.1 seconds between calls (free burst limit) and is
+  capped at 100 unique cards per pull so two pulls stay under PokeTrace's
+  250-request daily allowance.
+- The graded pull is capped at 40 cards per pull. TCGGO's free plan is a hard
+  100 requests/day, and a card costs two requests the first time it is seen
+  (id lookup + prices). Resolved ids are cached in `backend/.tcggo_ids.json`,
+  so later pulls cost one request per card.
 - Searching is still live: each search is one PokeTrace request.
 
 ---
@@ -405,6 +418,7 @@ pokemon-card-tracker/
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── poketrace.py
+│   │       ├── tcggo.py
 │   │       ├── portfolio.py
 │   │       ├── price_sync.py
 │   │       └── valuation.py

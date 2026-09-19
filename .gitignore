@@ -25,3 +25,4 @@ Thumbs.db
 
 # Scheduler state (which AM/PM slot last pulled)
 backend/.price_sync_state.json
+backend/.tcggo_ids.json

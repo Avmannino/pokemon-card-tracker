@@ -7,7 +7,7 @@ from typing import Any
 
 from .. import db
 from ..config import settings
-from . import poketrace
+from . import poketrace, tcggo
 
 
 logger = logging.getLogger("price_sync")
@@ -22,6 +22,10 @@ MAX_CARDS_PER_PULL = 100
 
 # PokeTrace Free burst limit is 1 request / 2 seconds.
 REQUEST_SPACING_SECONDS = 2.1
+
+# TCGGO's free plan is a hard 100 requests/day, and a card can cost two
+# requests (id lookup + prices) the first time it is seen.
+MAX_GRADED_CARDS_PER_PULL = 40
 
 
 def _now() -> datetime:
@@ -87,16 +91,20 @@ async def pull_card_raw_prices(card_id: str) -> int:
 
 
 async def sync_all_cards(slot: datetime) -> None:
-    state: dict[str, Any] = {
-        "slot": slot.isoformat(),
-        "started_at": _now().isoformat(),
-        "finished_at": None,
-        "attempted": 0,
-        "succeeded": 0,
-        "failed": 0,
-        "skipped": 0,
-        "stopped_early": None,
-    }
+    # Keep the graded pull's own record ("graded") when rewriting this one.
+    state = _read_state() or {}
+    state.update(
+        {
+            "slot": slot.isoformat(),
+            "started_at": _now().isoformat(),
+            "finished_at": None,
+            "attempted": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": 0,
+            "stopped_early": None,
+        }
+    )
 
     # Recorded up front: a crash or restart mid-pull must not cause a second
     # pull for the same slot.
@@ -136,18 +144,110 @@ async def sync_all_cards(slot: datetime) -> None:
     )
 
 
+async def pull_card_graded_prices(card: dict[str, Any]) -> int:
+    """Saves PSA 7-10 eBay sold medians for one card. Returns how many grades
+    had data (0 when TCGGO has no graded sales for the card)."""
+    api_id = await tcggo.resolve_card_id(card)
+    if api_id is None:
+        return 0
+
+    medians = await tcggo.get_psa_medians(api_id)
+
+    for grade, (median, sample_size) in medians.items():
+        db.insert_price_snapshot(
+            card_id=card["id"],
+            grade=f"PSA_{grade}",
+            source=tcggo.SOURCE_LABEL,
+            value=median,
+            metadata={
+                "provider": "TCGGO",
+                "underlying_source": "ebay",
+                "grader": "PSA",
+                "currency": "USD",
+                "sample_size": sample_size,
+            },
+        )
+
+    return len(medians)
+
+
+async def sync_graded_prices(slot: datetime) -> None:
+    graded: dict[str, Any] = {
+        "slot": slot.isoformat(),
+        "started_at": _now().isoformat(),
+        "finished_at": None,
+        "attempted": 0,
+        "with_data": 0,
+        "failed": 0,
+        "skipped": 0,
+        "stopped_early": None,
+    }
+
+    # Recorded up front, like the raw pull, so it can run at most once per
+    # slot no matter how often the backend restarts.
+    state = _read_state() or {}
+    state["graded"] = graded
+    _write_state(state)
+
+    unique_card_ids = list(
+        dict.fromkeys(item["card_id"] for item in db.get_collection_items())
+    )
+    card_ids = unique_card_ids[:MAX_GRADED_CARDS_PER_PULL]
+    graded["skipped"] = len(unique_card_ids) - len(card_ids)
+
+    for card_id in card_ids:
+        graded["attempted"] += 1
+
+        try:
+            card = db.get_card(card_id)
+            if card and await pull_card_graded_prices(card):
+                graded["with_data"] += 1
+        except tcggo.TcggoRateLimited as exc:
+            graded["failed"] += 1
+            graded["stopped_early"] = str(exc)
+            break
+        except Exception:
+            graded["failed"] += 1
+            logger.exception("Graded price pull failed for card %s", card_id)
+
+    graded["finished_at"] = _now().isoformat()
+    state = _read_state() or {}
+    state["graded"] = graded
+    _write_state(state)
+
+    logger.info(
+        "Graded price pull finished: %s with data, %s failed, %s attempted",
+        graded["with_data"],
+        graded["failed"],
+        graded["attempted"],
+    )
+
+
 async def run_scheduler() -> None:
     """Pulls prices once per slot (AM and PM). Also catches up on startup if
-    the current slot's pull never happened, e.g. the backend was off."""
-    while True:
-        try:
-            slot = current_slot(_now())
-            state = _read_state()
+    the current slot's pull never happened, e.g. the backend was off.
 
+    Raw prices (PokeTrace) and graded prices (TCGGO) are tracked separately,
+    each at most once per slot."""
+    while True:
+        slot = current_slot(_now())
+
+        try:
+            state = _read_state()
             if not state or state.get("slot") != slot.isoformat():
                 await sync_all_cards(slot)
         except Exception:
             logger.exception("Scheduled price pull failed")
+
+        try:
+            state = _read_state() or {}
+            if (
+                tcggo.is_configured()
+                and (state.get("graded") or {}).get("slot") != slot.isoformat()
+            ):
+                await sync_graded_prices(slot)
+        except Exception:
+            logger.exception("Scheduled graded price pull failed")
 
         wait = (next_slot(_now()) - _now()).total_seconds()
         await asyncio.sleep(max(wait, 0) + 1)
@@ -172,5 +272,6 @@ def get_status() -> dict[str, Any]:
             if state
             else None
         ),
+        "graded": (state or {}).get("graded"),
         "next_pull_at": next_slot(_now()).isoformat(),
     }
