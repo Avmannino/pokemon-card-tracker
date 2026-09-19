@@ -58,6 +58,35 @@ function gradeLabel(grade) {
   return grade.replace("_", " ");
 }
 
+// key === null means the column can't be sorted.
+const COLLECTION_COLUMNS = [
+  { key: "card", label: "Card", numeric: false },
+  ...GRADES.map((grade) => ({
+    key: grade,
+    label: gradeLabel(grade),
+    numeric: true,
+  })),
+  { key: "owned", label: "You Own", numeric: true },
+  { key: "qty", label: "Qty", numeric: true },
+  { key: "value", label: "Your Value", numeric: true },
+  { key: null, label: "Actions", numeric: false },
+];
+
+function sortValue(item, key) {
+  switch (key) {
+    case "card":
+      return cardTitle(item.card).toLowerCase();
+    case "owned":
+      return GRADES.indexOf(item.ownership_grade);
+    case "qty":
+      return item.quantity;
+    case "value":
+      return item.owned_market_value_total;
+    default:
+      return item.market_values?.[key]?.estimate;
+  }
+}
+
 function emptyAddForm(card = null) {
   return {
     card,
@@ -92,6 +121,7 @@ function App() {
 
   const [query, setQuery] = useState("");
   const [collectionQuery, setCollectionQuery] = useState("");
+  const [sort, setSort] = useState({ key: "value", direction: "desc" });
   const searchInputRef = useRef(null);
   const [searchResults, setSearchResults] = useState([]);
   const [searchPage, setSearchPage] = useState(0);
@@ -168,6 +198,50 @@ function App() {
       return terms.every((term) => haystack.includes(term));
     });
   }, [collection.items, collectionQuery]);
+
+  // Cards with no price for a column sort to the bottom either way, so
+  // flipping the direction never buries the priced ones.
+  const sortedItems = useMemo(() => {
+    if (!sort.key) {
+      return filteredItems;
+    }
+
+    const direction = sort.direction === "asc" ? 1 : -1;
+
+    return [...filteredItems].sort((a, b) => {
+      const left = sortValue(a, sort.key);
+      const right = sortValue(b, sort.key);
+
+      const leftMissing = left === null || left === undefined;
+      const rightMissing = right === null || right === undefined;
+
+      if (leftMissing || rightMissing) {
+        return leftMissing && rightMissing ? 0 : leftMissing ? 1 : -1;
+      }
+
+      if (typeof left === "string") {
+        return left.localeCompare(right) * direction;
+      }
+
+      return (left - right) * direction;
+    });
+  }, [filteredItems, sort]);
+
+  function toggleSort(column) {
+    if (!column.key) {
+      return;
+    }
+
+    setSort((current) =>
+      current.key === column.key
+        ? {
+            key: column.key,
+            direction: current.direction === "asc" ? "desc" : "asc",
+          }
+        // Money and counts are most useful highest-first; names A-Z.
+        : { key: column.key, direction: column.numeric ? "desc" : "asc" }
+    );
+  }
 
   const searchPages = useMemo(
     () => chunk(searchResults, SEARCH_PAGE_SIZE),
@@ -586,21 +660,47 @@ function App() {
             <table className="collection-table">
               <thead>
                 <tr>
-                  <th>Card</th>
-                  <th>Raw</th>
-                  <th>PSA 7</th>
-                  <th>PSA 8</th>
-                  <th>PSA 9</th>
-                  <th>PSA 10</th>
-                  <th>You Own</th>
-                  <th>Qty</th>
-                  <th>Your Value</th>
-                  <th>Actions</th>
+                  {COLLECTION_COLUMNS.map((column) => (
+                    <th
+                      key={column.label}
+                      aria-sort={
+                        sort.key === column.key
+                          ? sort.direction === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : undefined
+                      }
+                    >
+                      {column.key ? (
+                        <button
+                          type="button"
+                          className={
+                            sort.key === column.key
+                              ? "sort-button active"
+                              : "sort-button"
+                          }
+                          onClick={() => toggleSort(column)}
+                        >
+                          {column.label}
+
+                          <span className="sort-caret">
+                            {sort.key === column.key
+                              ? sort.direction === "asc"
+                                ? "▲"
+                                : "▼"
+                              : "↕"}
+                          </span>
+                        </button>
+                      ) : (
+                        column.label
+                      )}
+                    </th>
+                  ))}
                 </tr>
               </thead>
 
               <tbody>
-                {filteredItems.map((item) => (
+                {sortedItems.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <div className="table-card-cell">

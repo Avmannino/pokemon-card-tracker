@@ -1031,6 +1031,44 @@ h2 {
   text-transform: uppercase;
 }
 
+.sort-button {
+  display: inline-flex;
+
+  gap: 5px;
+
+  align-items: center;
+
+  padding: 0;
+
+  background: transparent;
+
+  color: inherit;
+
+  font: inherit;
+
+  letter-spacing: inherit;
+
+  text-transform: inherit;
+}
+
+.sort-button:hover {
+  color: #dfe4ef;
+}
+
+.sort-button.active {
+  color: #8fb0ff;
+}
+
+.sort-caret {
+  font-size: 0.62rem;
+
+  opacity: 0.35;
+}
+
+.sort-button.active .sort-caret {
+  opacity: 1;
+}
+
 .collection-table td {
   padding: 14px 12px;
 
