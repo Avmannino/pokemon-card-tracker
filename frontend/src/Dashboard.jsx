@@ -398,7 +398,12 @@ function Dashboard({ refreshKey }) {
                       className="thumb-clickable"
                       src={row.card.image_url}
                       alt={cardTitle(row.card)}
-                      onClick={() => openZoom(row.card)}
+                      onClick={() =>
+                        openZoom(row.card, {
+                          grade: row.grade,
+                          valueEach: row.value_each,
+                        })
+                      }
                     />
                   )}
 
@@ -438,7 +443,12 @@ function Dashboard({ refreshKey }) {
                       className="thumb-clickable"
                       src={mover.card.image_url}
                       alt={cardTitle(mover.card)}
-                      onClick={() => openZoom(mover.card)}
+                      onClick={() =>
+                        openZoom(mover.card, {
+                          grade: mover.grade,
+                          valueEach: mover.value_each,
+                        })
+                      }
                     />
                   )}
 

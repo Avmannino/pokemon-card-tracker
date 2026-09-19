@@ -125,6 +125,7 @@ def build_dashboard(
         per_item.append(
             {
                 "card": entry["card"],
+                "grade": item["ownership_grade"],
                 "quantity": int(item.get("quantity") or 1),
                 "breakpoints": breakpoints,
             }
@@ -222,6 +223,9 @@ def build_dashboard(
                 magnitude,
                 {
                     "card": entry["card"],
+                    "grade": entry["grade"],
+                    "quantity": entry["quantity"],
+                    "value_each": round(now_value, 2),
                     "current_value": round(now_value * entry["quantity"], 2),
                     "changes": changes,
                 },
@@ -240,6 +244,9 @@ def build_dashboard(
         top_cards.append(
             {
                 "card": entry["card"],
+                "grade": entry["grade"],
+                "quantity": entry["quantity"],
+                "value_each": round(value, 2),
                 "value": round(value * entry["quantity"], 2),
             }
         )

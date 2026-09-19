@@ -1400,6 +1400,40 @@ h2 {
   font-size: 0.85rem;
 }
 
+.card-zoom-price {
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  gap: 2px;
+
+  margin-top: 10px;
+
+  padding: 10px 22px;
+
+  border: 1px solid #293244;
+
+  border-radius: 14px;
+
+  background: rgba(17, 23, 32, 0.92);
+}
+
+.card-zoom figcaption .card-zoom-price strong {
+  color: #8fb0ff;
+
+  font-size: 1.5rem;
+
+  letter-spacing: -0.02em;
+}
+
+.card-zoom figcaption .card-zoom-price span {
+  color: #737f93;
+
+  font-size: 0.74rem;
+}
+
 .card-zoom-close {
   position: absolute;
 

@@ -10,7 +10,7 @@ import {
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import Dashboard from "./Dashboard.jsx";
-import { money, cardTitle } from "./format.js";
+import { money, cardTitle, gradeLabel } from "./format.js";
 
 const GRADES = ["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"];
 
@@ -53,14 +53,6 @@ function chunk(items, size) {
   }
 
   return chunks;
-}
-
-function gradeLabel(grade) {
-  if (grade === "RAW") {
-    return "Raw";
-  }
-
-  return grade.replace("_", " ");
 }
 
 // key === null means the column can't be sorted.
@@ -717,7 +709,12 @@ function App() {
                             className="thumb-clickable"
                             src={item.card.image_url}
                             alt={cardTitle(item.card)}
-                            onClick={() => openZoom(item.card)}
+                            onClick={() =>
+                              openZoom(item.card, {
+                                grade: item.ownership_grade,
+                                valueEach: item.owned_market_value_each,
+                              })
+                            }
                           />
                         )}
 

@@ -14,6 +14,14 @@ export function money(value) {
   }).format(Number(value));
 }
 
+export function gradeLabel(grade) {
+  if (grade === "RAW") {
+    return "Raw";
+  }
+
+  return grade.replace("_", " ");
+}
+
 export function percent(value) {
   if (
     value === null ||
