@@ -854,19 +854,36 @@ function App() {
                             )}
                           </strong>
 
-                          <span>
-                            {item.market_values?.[grade]?.is_manual
-                              ? "Manual"
-                              : `${
-                                  item.market_values?.[grade]
-                                    ?.source_count || 0
-                                } source${
-                                  (item.market_values?.[grade]
-                                    ?.source_count || 0) === 1
-                                    ? ""
-                                    : "s"
-                                }`}
-                          </span>
+                          {item.market_values?.[grade]?.is_manual ? (
+                            item.market_values[grade].source_url ? (
+                              <a
+                                className="manual-source-link"
+                                href={item.market_values[grade].source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open the source you entered this price from"
+                              >
+                                Manual
+                              </a>
+                            ) : (
+                              <span
+                                className="manual-source-link"
+                                title="No source URL saved — add one via PSA values to link this"
+                              >
+                                Manual
+                              </span>
+                            )
+                          ) : (
+                            <span>
+                              {item.market_values?.[grade]
+                                ?.source_count || 0}{" "}
+                              source
+                              {(item.market_values?.[grade]
+                                ?.source_count || 0) === 1
+                                ? ""
+                                : "s"}
+                            </span>
+                          )}
                         </div>
                       </td>
                     ))}

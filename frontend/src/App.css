@@ -1302,6 +1302,34 @@ h2 {
   white-space: nowrap;
 }
 
+.manual-source-link {
+  width: fit-content;
+
+  color: #717d91;
+
+  font-size: 0.73rem;
+
+  text-decoration: none;
+}
+
+a.manual-source-link {
+  color: #79a0ff;
+
+  cursor: pointer;
+
+  text-decoration: underline;
+
+  text-decoration-color: rgba(121, 160, 255, 0.35);
+
+  text-underline-offset: 2px;
+}
+
+a.manual-source-link:hover {
+  color: #a9c0ff;
+
+  text-decoration-color: currentColor;
+}
+
 .action-stack {
   display: flex;
 

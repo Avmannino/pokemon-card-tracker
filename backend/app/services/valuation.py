@@ -63,6 +63,15 @@ def build_market_values(
 
         estimate = round(float(median(numeric_values)), 2) if numeric_values else None
 
+        # So "Manual" in the UI can link straight back to where the price
+        # was checked. With more than one manual source, link the most
+        # recently entered one.
+        manual_url = None
+        if is_manual:
+            manual_url = max(
+                manual_sources, key=lambda row: row.get("observed_at") or ""
+            ).get("source_url")
+
         if is_manual:
             confidence = "MANUAL"
         elif len(numeric_values) >= 3:
@@ -78,6 +87,7 @@ def build_market_values(
             "estimate": estimate,
             "confidence": confidence,
             "is_manual": is_manual,
+            "source_url": manual_url,
             "source_count": len(numeric_values),
             "sources": [
                 {
