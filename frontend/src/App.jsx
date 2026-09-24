@@ -855,13 +855,17 @@ function App() {
                           </strong>
 
                           <span>
-                            {item.market_values?.[grade]
-                              ?.source_count || 0}{" "}
-                            source
-                            {(item.market_values?.[grade]
-                              ?.source_count || 0) === 1
-                              ? ""
-                              : "s"}
+                            {item.market_values?.[grade]?.is_manual
+                              ? "Manual"
+                              : `${
+                                  item.market_values?.[grade]
+                                    ?.source_count || 0
+                                } source${
+                                  (item.market_values?.[grade]
+                                    ?.source_count || 0) === 1
+                                    ? ""
+                                    : "s"
+                                }`}
                           </span>
                         </div>
                       </td>

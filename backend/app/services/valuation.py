@@ -41,15 +41,29 @@ def build_market_values(
             if row_grade == grade
         ]
 
+        # A value you entered yourself always wins over an automated feed for
+        # that grade, rather than being averaged into it — otherwise an
+        # unreliable auto-pulled price (e.g. TCGGO re-writing itself every
+        # sync) quietly drags a manually-verified price back toward it.
+        # Multiple manual entries still blend together, since that's a
+        # legitimate multi-source comp.
+        manual_sources = [
+            row for row in sources if row.get("metadata", {}).get("entry_method") == "manual"
+        ]
+        is_manual = bool(manual_sources)
+        sources_for_estimate = manual_sources if is_manual else sources
+
         numeric_values = [
             value
-            for value in (_as_float(row.get("value")) for row in sources)
+            for value in (_as_float(row.get("value")) for row in sources_for_estimate)
             if value is not None
         ]
 
         estimate = round(float(median(numeric_values)), 2) if numeric_values else None
 
-        if len(numeric_values) >= 3:
+        if is_manual:
+            confidence = "MANUAL"
+        elif len(numeric_values) >= 3:
             confidence = "HIGH"
         elif len(numeric_values) == 2:
             confidence = "MEDIUM"
@@ -61,6 +75,7 @@ def build_market_values(
         result[grade] = {
             "estimate": estimate,
             "confidence": confidence,
+            "is_manual": is_manual,
             "source_count": len(numeric_values),
             "sources": [
                 {
