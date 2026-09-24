@@ -48,7 +48,9 @@ def build_market_values(
         # Multiple manual entries still blend together, since that's a
         # legitimate multi-source comp.
         manual_sources = [
-            row for row in sources if row.get("metadata", {}).get("entry_method") == "manual"
+            row
+            for row in sources
+            if (row.get("metadata") or {}).get("entry_method") == "manual"
         ]
         is_manual = bool(manual_sources)
         sources_for_estimate = manual_sources if is_manual else sources

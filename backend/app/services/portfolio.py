@@ -59,14 +59,40 @@ def _item_breakpoints(
     """The value of one collection item's owned grade only changes on days
     a new snapshot lands for it. Returns those step-change dates (ascending)
     paired with the estimate effective from that date forward, so later
-    lookups are a cheap bisect instead of rescanning every snapshot."""
+    lookups are a cheap bisect instead of rescanning every snapshot.
+
+    A card's very first snapshot often lands the moment it's added (an
+    automated guess, sometimes an unreliable one - see graded prices), and
+    _value_at() forward-fills that first value as the card's "entry price"
+    for the whole history. If you later correct that grade by hand, we treat
+    your first manual entry as the true value for the entire time you've
+    owned it, rather than letting the correction from a bad initial auto
+    guess show up as portfolio gain. A later manual *revision* still counts
+    as a real change from when you made it - only the initial guess is
+    superseded, not the record of a genuine update.
+    """
+    grade_snapshots = [
+        snapshot for snapshot in snapshots_desc if snapshot.get("grade") == grade
+    ]
+
     change_dates = sorted(
         {
             _parse_observed_at(snapshot["observed_at"]).date()
-            for snapshot in snapshots_desc
-            if snapshot.get("grade") == grade
+            for snapshot in grade_snapshots
         }
     )
+
+    first_manual_date = min(
+        (
+            _parse_observed_at(snapshot["observed_at"]).date()
+            for snapshot in grade_snapshots
+            if (snapshot.get("metadata") or {}).get("entry_method") == "manual"
+        ),
+        default=None,
+    )
+
+    if first_manual_date is not None:
+        change_dates = [day for day in change_dates if day >= first_manual_date]
 
     dates: list[date] = []
     estimates: list[float] = []
