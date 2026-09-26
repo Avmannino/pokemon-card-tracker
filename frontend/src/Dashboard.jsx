@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getPortfolioDashboard } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import { money, percent, cardTitle } from "./format.js";
 
 const CHART_RANGES = [
-  { key: "1D", label: "1D", days: 1 },
-  { key: "1W", label: "1W", days: 7 },
-  { key: "1M", label: "1M", days: 30 },
-  { key: "ALL", label: "All", days: null },
+  { key: "1D", label: "1D" },
+  { key: "1W", label: "1W" },
+  { key: "1M", label: "1M" },
+  { key: "3M", label: "3M" },
+  { key: "1Y", label: "1Y" },
+  { key: "ALL", label: "All" },
 ];
+
+// Short ranges show times on hover; longer ones just the date.
+const TIMED_RANGES = new Set(["1D", "1W"]);
 
 // Portfolio-level value change.
 const PERFORMANCE_WINDOWS = [
@@ -33,13 +38,13 @@ function signedMoney(value) {
   return `${value >= 0 ? "+" : "−"}${money(Math.abs(value))}`;
 }
 
-function formatDate(value) {
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+function formatTimestamp(value, withTime) {
+  return new Date(value).toLocaleString(
+    "en-US",
+    withTime
+      ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+      : { month: "short", day: "numeric", year: "numeric" }
+  );
 }
 
 function ChangeBadge({ change, changePct }) {
@@ -63,23 +68,27 @@ function LineChart({ points, hoveredIndex, onHover }) {
   const padX = 6;
   const padY = 14;
 
-  const values = points.map((point) => point.total_value);
+  // The performance line: raw value minus cards added/removed in the
+  // range, so only market movement moves it.
+  const values = points.map((point) => point.adjusted_value);
+  const times = points.map((point) => new Date(point.timestamp).getTime());
+  const firstTime = times[0];
+  const timeSpan = times[times.length - 1] - firstTime || 1;
+  const plotWidth = width - padX * 2;
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const span = maxValue - minValue || Math.max(Math.abs(maxValue), 1) * 0.02 || 1;
 
-  const stepX = points.length > 1 ? (width - padX * 2) / (points.length - 1) : 0;
-
   const coords = points.map((point, index) => ({
-    x: padX + stepX * index,
+    x: padX + ((times[index] - firstTime) / timeSpan) * plotWidth,
     y:
       height -
       padY -
-      ((point.total_value - minValue) / span) * (height - padY * 2),
+      ((point.adjusted_value - minValue) / span) * (height - padY * 2),
   }));
 
   const isPositive =
-    points[points.length - 1].total_value >= points[0].total_value;
+    points[points.length - 1].adjusted_value >= points[0].adjusted_value;
   const stroke = isPositive ? "#5fe3a4" : "#f18a8a";
   const fillId = isPositive ? "chart-fill-up" : "chart-fill-down";
 
@@ -101,9 +110,16 @@ function LineChart({ points, hoveredIndex, onHover }) {
     const rect = event.currentTarget.getBoundingClientRect();
     const relativeX = ((event.clientX - rect.left) / rect.width) * width;
     const clamped = Math.max(padX, Math.min(width - padX, relativeX));
-    const index = Math.round((clamped - padX) / stepX);
+    const target = firstTime + ((clamped - padX) / plotWidth) * timeSpan;
 
-    onHover(Math.max(0, Math.min(points.length - 1, index)));
+    let nearest = 0;
+    times.forEach((time, index) => {
+      if (Math.abs(time - target) < Math.abs(times[nearest] - target)) {
+        nearest = index;
+      }
+    });
+
+    onHover(nearest);
   }
 
   const hovered =
@@ -238,42 +254,8 @@ function Dashboard({ refreshKey }) {
     setHoveredIndex(null);
   }, [range]);
 
-  const filteredHistory = useMemo(() => {
-    if (!data) {
-      return [];
-    }
-
-    const known = data.history.filter((point) => point.total_value !== null);
-    const activeRange = CHART_RANGES.find((entry) => entry.key === range);
-
-    if (!activeRange || activeRange.days === null) {
-      return known;
-    }
-
-    const cutoff = new Date();
-    cutoff.setUTCDate(cutoff.getUTCDate() - activeRange.days);
-    const cutoffKey = cutoff.toISOString().slice(0, 10);
-
-    const sliced = known.filter((point) => point.date >= cutoffKey);
-
-    // Keep at least the latest point so a sparse range (refreshes less
-    // often than the range itself) still shows a value instead of going
-    // blank.
-    return sliced.length > 0 ? sliced : known.slice(-1);
-  }, [data, range]);
-
-  const rangeChange = useMemo(() => {
-    if (filteredHistory.length === 0) {
-      return null;
-    }
-
-    const first = filteredHistory[0].total_value;
-    const last = filteredHistory[filteredHistory.length - 1].total_value;
-    const change = round2(last - first);
-    const changePct = first ? round2((change / first) * 100) : null;
-
-    return { change, changePct };
-  }, [filteredHistory]);
+  const rangeData = data?.ranges?.[range];
+  const points = rangeData?.points || [];
 
   if (loading) {
     return (
@@ -291,7 +273,7 @@ function Dashboard({ refreshKey }) {
     );
   }
 
-  if (!data || filteredHistory.length === 0) {
+  if (!data?.ranges?.ALL?.points?.length) {
     return (
       <section className="dashboard-panel">
         <div className="dashboard-heading">
@@ -306,18 +288,8 @@ function Dashboard({ refreshKey }) {
     );
   }
 
-  const latest = filteredHistory[filteredHistory.length - 1];
-  // The chart values the cards you hold now at each day's prices, so a card
-  // added recently is flat-lined before its first known price.
-  const partialBefore =
-    data.full_history_since &&
-    filteredHistory[0].date < data.full_history_since
-      ? data.full_history_since
-      : null;
   const activePoint =
-    hoveredIndex !== null && filteredHistory[hoveredIndex]
-      ? filteredHistory[hoveredIndex]
-      : latest;
+    hoveredIndex !== null && points[hoveredIndex] ? points[hoveredIndex] : null;
 
   return (
     <section className="dashboard-panel">
@@ -328,7 +300,7 @@ function Dashboard({ refreshKey }) {
 
       <div className="performance-row">
         {PERFORMANCE_WINDOWS.map(({ key, label }) => {
-          const window = data.performance?.[key] || {};
+          const window = data.ranges?.[key] || {};
           const missing =
             window.change === null || window.change === undefined;
           const tone = window.change >= 0 ? "positive" : "negative";
@@ -362,20 +334,26 @@ function Dashboard({ refreshKey }) {
               <p className="eyebrow">PORTFOLIO VALUE</p>
 
               <div className="chart-value-row">
-                <strong>{money(activePoint.total_value)}</strong>
+                <strong>
+                  {money(
+                    activePoint
+                      ? activePoint.adjusted_value
+                      : data.current_total_value
+                  )}
+                </strong>
 
-                {hoveredIndex === null && (
-                  <ChangeBadge
-                    change={rangeChange?.change}
-                    changePct={rangeChange?.changePct}
-                  />
-                )}
+                <ChangeBadge
+                  change={activePoint ? activePoint.change : rangeData?.change}
+                  changePct={
+                    activePoint ? activePoint.change_pct : rangeData?.change_pct
+                  }
+                />
               </div>
 
               <span className="chart-date-label">
-                {hoveredIndex !== null
-                  ? formatDate(activePoint.date)
-                  : `As of ${formatDate(latest.date)}`}
+                {activePoint
+                  ? formatTimestamp(activePoint.timestamp, TIMED_RANGES.has(range))
+                  : rangeData?.end && `As of ${formatTimestamp(rangeData.end, true)}`}
               </span>
             </div>
 
@@ -393,18 +371,18 @@ function Dashboard({ refreshKey }) {
             </div>
           </div>
 
-          <LineChart
-            points={filteredHistory}
-            hoveredIndex={hoveredIndex}
-            onHover={setHoveredIndex}
-          />
-
-          {partialBefore && (
-            <p className="chart-note">
-              Current cards at each day&apos;s market prices; cards added
-              later are held flat before {formatDate(partialBefore)}.
-            </p>
+          {points.length > 0 && (
+            <LineChart
+              points={points}
+              hoveredIndex={hoveredIndex}
+              onHover={setHoveredIndex}
+            />
           )}
+
+          <p className="chart-note">
+            Performance only: adding or removing cards doesn&apos;t move this
+            line, market price changes do.
+          </p>
         </div>
 
         <aside className="top-cards-panel">
@@ -518,10 +496,6 @@ function Dashboard({ refreshKey }) {
       <CardZoomModal card={zoomedCard} onClose={closeZoom} />
     </section>
   );
-}
-
-function round2(value) {
-  return Math.round(value * 100) / 100;
 }
 
 export default Dashboard;

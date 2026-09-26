@@ -48,8 +48,11 @@ export function addCollectionItem(payload) {
   });
 }
 
-export function deleteCollectionItem(itemId) {
-  return request(`/api/collection/${itemId}`, {
+// Removes `quantity` copies (all of them if omitted).
+export function deleteCollectionItem(itemId, quantity) {
+  const params = quantity ? `?quantity=${quantity}` : "";
+
+  return request(`/api/collection/${itemId}${params}`, {
     method: "DELETE",
   });
 }

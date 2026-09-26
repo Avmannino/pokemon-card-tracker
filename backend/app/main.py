@@ -1,16 +1,21 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from . import db
 from .config import settings
 from .schemas import AddCollectionRequest, GradedValuesRequest
 from .services import poketrace, price_sync
-from .services.portfolio import build_dashboard, value_change
+from .services.portfolio import build_dashboard, lot_price, value_change
 from .services.valuation import build_market_values
+
+
+logger = logging.getLogger("main")
 
 
 @asynccontextmanager
@@ -31,6 +36,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# The dashboard returns a chart series per range; compress it.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 def serialize_collection_item(
@@ -112,21 +120,56 @@ def list_collection() -> dict[str, Any]:
 def portfolio_dashboard() -> dict[str, Any]:
     items = db.get_collection_items()
 
-    entries = []
-    for item in items:
-        card = db.get_card(item["card_id"])
-        if not card:
-            continue
-
-        entries.append(
-            {
-                "item": item,
-                "card": card,
-                "snapshots": db.get_price_snapshots(card["id"]),
-            }
+    events_recorded = True
+    try:
+        events = db.get_collection_events()
+    except Exception:
+        # Table not created yet: current cards still chart from when each was
+        # added, but nothing removed can be accounted for.
+        logger.warning(
+            "collection_events unavailable; run supabase/schema.sql",
+            exc_info=True,
         )
+        events = []
+        events_recorded = False
 
-    return build_dashboard(entries)
+    card_ids = {item["card_id"] for item in items} | {
+        event["card_id"] for event in events
+    }
+
+    return build_dashboard(
+        items=items,
+        events=events,
+        cards=db.get_cards(card_ids),
+        snapshots_by_card=db.get_price_snapshots_for_cards(card_ids),
+        events_recorded=events_recorded,
+    )
+
+
+def _record_add_event(item: dict[str, Any]) -> None:
+    """Book the card's entry into the collection at its market value right
+    now. If this fails (e.g. the table doesn't exist yet), the schema.sql
+    backfill or the dashboard fall back to the row's creation time."""
+    try:
+        price = lot_price(
+            db.get_price_snapshots(item["card_id"]),
+            item["ownership_grade"],
+            added_at=item["created_at"],
+            moment=item["created_at"],
+        )
+        db.insert_collection_event(
+            collection_item_id=item["id"],
+            card_id=item["card_id"],
+            grade=item["ownership_grade"],
+            event_type="ADD",
+            quantity=int(item["quantity"]),
+            occurred_at=item["created_at"],
+            market_value_per_card=price,
+        )
+    except Exception:
+        logger.exception(
+            "Couldn't record ADD event for collection item %s", item["id"]
+        )
 
 
 @app.post("/api/collection")
@@ -155,6 +198,10 @@ async def add_to_collection(
             "Price fetch failed for newly added card %s", card["id"]
         )
 
+    # Recorded after the price fetch, so the entry is valued at the price
+    # you'd see for it right now.
+    _record_add_event(item)
+
     card = db.get_card(card["id"])
 
     return {
@@ -164,9 +211,86 @@ async def add_to_collection(
 
 
 @app.delete("/api/collection/{item_id}")
-def remove_from_collection(item_id: str) -> dict[str, bool]:
-    db.delete_collection_item(item_id)
-    return {"deleted": True}
+def remove_from_collection(
+    item_id: str,
+    quantity: int | None = Query(default=None, ge=1),
+) -> dict[str, Any]:
+    """Removes `quantity` copies (default: all) and books the removal at the
+    cards' market value right now, so the performance chart treats it as a
+    withdrawal instead of a loss and keeps the gains they had while owned."""
+    item = db.get_collection_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Card not found in your collection.")
+
+    held = int(item["quantity"])
+    count = held if quantity is None else quantity
+    if count > held:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You only have {held} of this card.",
+        )
+
+    try:
+        events = db.get_collection_events(item_id)
+    except Exception as exc:
+        # Removing without recording it would erase this card's history, so
+        # refuse rather than lose it.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Removal history isn't set up yet. Run the collection_events "
+                "SQL in supabase/schema.sql, then try again."
+            ),
+        ) from exc
+
+    if not any(event["event_type"] == "ADD" for event in events):
+        # Added before event tracking and not backfilled yet: record when it
+        # was added first, so the removal has a lot to come out of.
+        removed_before = sum(int(event["quantity"]) for event in events)
+        db.insert_collection_event(
+            collection_item_id=item_id,
+            card_id=item["card_id"],
+            grade=item["ownership_grade"],
+            event_type="ADD",
+            quantity=held + removed_before,
+            occurred_at=item["created_at"],
+            market_value_per_card=None,
+            recorded_by="backfill",
+        )
+
+    now = datetime.now(timezone.utc)
+    price = lot_price(
+        db.get_price_snapshots(item["card_id"]),
+        item["ownership_grade"],
+        added_at=item["created_at"],
+        moment=now,
+    )
+
+    event = db.insert_collection_event(
+        collection_item_id=item_id,
+        card_id=item["card_id"],
+        grade=item["ownership_grade"],
+        event_type="REMOVE",
+        quantity=count,
+        occurred_at=now.isoformat(),
+        market_value_per_card=price,
+    )
+
+    try:
+        if count == held:
+            db.delete_collection_item(item_id)
+        else:
+            db.update_collection_item_quantity(item_id, held - count)
+    except Exception:
+        # Keep the history consistent with what's actually in the collection.
+        db.delete_collection_event(event["id"])
+        raise
+
+    return {
+        "removed": count,
+        "remaining": held - count,
+        "market_value_per_card": price,
+    }
 
 
 @app.get("/api/refresh-status")

@@ -14,6 +14,35 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def is_manual_entry(row: dict[str, Any]) -> bool:
+    return (row.get("metadata") or {}).get("entry_method") == "manual"
+
+
+def estimate_from_sources(
+    latest_rows,
+) -> tuple[float | None, list[float]]:
+    """The estimate for one grade from the newest snapshot of each source,
+    and the values it was taken from.
+
+    A value you entered yourself always wins over an automated feed for that
+    grade, rather than being averaged into it — otherwise an unreliable
+    auto-pulled price (e.g. TCGGO re-writing itself every sync) quietly drags
+    a manually-verified price back toward it. Multiple manual entries still
+    blend together, since that's a legitimate multi-source comp. Shared with
+    the performance history so past and current values follow one rule."""
+    rows = list(latest_rows)
+    manual_rows = [row for row in rows if is_manual_entry(row)]
+
+    values = [
+        value
+        for value in (_as_float(row.get("value")) for row in (manual_rows or rows))
+        if value is not None
+    ]
+
+    estimate = round(float(median(values)), 2) if values else None
+    return estimate, values
+
+
 def build_market_values(
     snapshots: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
@@ -41,27 +70,9 @@ def build_market_values(
             if row_grade == grade
         ]
 
-        # A value you entered yourself always wins over an automated feed for
-        # that grade, rather than being averaged into it — otherwise an
-        # unreliable auto-pulled price (e.g. TCGGO re-writing itself every
-        # sync) quietly drags a manually-verified price back toward it.
-        # Multiple manual entries still blend together, since that's a
-        # legitimate multi-source comp.
-        manual_sources = [
-            row
-            for row in sources
-            if (row.get("metadata") or {}).get("entry_method") == "manual"
-        ]
+        manual_sources = [row for row in sources if is_manual_entry(row)]
         is_manual = bool(manual_sources)
-        sources_for_estimate = manual_sources if is_manual else sources
-
-        numeric_values = [
-            value
-            for value in (_as_float(row.get("value")) for row in sources_for_estimate)
-            if value is not None
-        ]
-
-        estimate = round(float(median(numeric_values)), 2) if numeric_values else None
+        estimate, numeric_values = estimate_from_sources(sources)
 
         # So "Manual" in the UI can link straight back to where the price
         # was checked. With more than one manual source, link the most

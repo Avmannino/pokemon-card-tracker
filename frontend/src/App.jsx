@@ -418,12 +418,30 @@ function App() {
     }
   }
 
-  async function handleDelete(itemId) {
-    const confirmed = window.confirm(
-      "Remove this copy from your collection?"
-    );
+  async function handleDelete(item) {
+    let quantity = 1;
 
-    if (!confirmed) {
+    if (item.quantity > 1) {
+      const answer = window.prompt(
+        `How many copies do you want to remove? You own ${item.quantity}.`,
+        "1"
+      );
+
+      if (answer === null) {
+        return;
+      }
+
+      quantity = Number(answer);
+
+      if (
+        !Number.isInteger(quantity) ||
+        quantity < 1 ||
+        quantity > item.quantity
+      ) {
+        setError(`Enter a whole number from 1 to ${item.quantity}.`);
+        return;
+      }
+    } else if (!window.confirm("Remove this card from your collection?")) {
       return;
     }
 
@@ -431,9 +449,13 @@ function App() {
     setMessage("");
 
     try {
-      await deleteCollectionItem(itemId);
+      await deleteCollectionItem(item.id, quantity);
       await loadCollection();
-      setMessage("Card removed from your collection.");
+      setMessage(
+        quantity === 1
+          ? "Card removed from your collection."
+          : `Removed ${quantity} copies from your collection.`
+      );
     } catch (err) {
       setError(err.message);
     }
@@ -930,7 +952,7 @@ function App() {
                           type="button"
                           className="text-button danger"
                           onClick={() =>
-                            handleDelete(item.id)
+                            handleDelete(item)
                           }
                         >
                           Remove
