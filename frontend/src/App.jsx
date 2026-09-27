@@ -186,6 +186,7 @@ function App() {
 
   const [query, setQuery] = useState("");
   const [collectionQuery, setCollectionQuery] = useState("");
+  const [collectionView, setCollectionView] = useState("table");
   const [sort, setSort] = useState({ key: "value", direction: "desc" });
   const searchInputRef = useRef(null);
   const [searchResults, setSearchResults] = useState([]);
@@ -745,14 +746,33 @@ function App() {
             <h2>Collection</h2>
           </div>
 
-          <div className="collection-meta">
-            <span>
-              Missing owned value:{" "}
-              <strong>
-                {collection.summary
-                  ?.items_missing_owned_value || 0}
-              </strong>
-            </span>
+          <div className="collection-heading-actions">
+            <div className="collection-meta">
+              <span>
+                Missing owned value:{" "}
+                <strong>
+                  {collection.summary
+                    ?.items_missing_owned_value || 0}
+                </strong>
+              </span>
+            </div>
+
+            <div className="range-tabs" role="group" aria-label="Collection view">
+              {[
+                { key: "table", label: "Table" },
+                { key: "gallery", label: "Gallery" },
+              ].map(({ key, label }) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={collectionView === key ? "active" : ""}
+                  aria-pressed={collectionView === key}
+                  onClick={() => setCollectionView(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -784,6 +804,44 @@ function App() {
         ) : collection.items.length === 0 ? (
           <div className="empty-state">
             Search for a card above and add your first card.
+          </div>
+        ) : collectionView === "gallery" ? (
+          <div
+            className="collection-gallery"
+            hidden={filteredItems.length === 0}
+          >
+            {sortedItems.map((item) => (
+              <article className="gallery-card" key={item.id}>
+                {item.card.image_url ? (
+                  <img
+                    className="thumb-clickable"
+                    src={item.card.image_url}
+                    alt={cardTitle(item.card)}
+                    onClick={() =>
+                      openZoom(item.card, {
+                        grade: item.ownership_grade,
+                        valueEach: item.owned_market_value_each,
+                      })
+                    }
+                  />
+                ) : (
+                  <div className="gallery-placeholder">No image</div>
+                )}
+
+                <strong className="gallery-title">
+                  {cardTitle(item.card)}
+                </strong>
+
+                <span className="gallery-value">
+                  {money(item.owned_market_value_total)}
+                </span>
+
+                <span className="gallery-grade">
+                  {gradeLabel(item.ownership_grade)}
+                  {item.quantity > 1 ? ` · Qty ${item.quantity}` : ""}
+                </span>
+              </article>
+            ))}
           </div>
         ) : (
           <div
