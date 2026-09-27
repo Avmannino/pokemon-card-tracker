@@ -284,6 +284,13 @@ class DashboardShape(unittest.TestCase):
                 point["raw_value"] - point["cumulative_net_flow"],
                 places=2,
             )
+            # Plotted value: same line, shifted to end at today's value.
+            self.assertAlmostEqual(
+                point["value"],
+                point["adjusted_value"] + full["net_flows"],
+                places=2,
+            )
+        self.assertAlmostEqual(full["points"][-1]["value"], 1175)
 
         # Only price moves change the line: +50 (c2) then -75 (c1).
         steps = {

@@ -298,6 +298,13 @@ class Performance:
                 )
                 since_last_point = 0.0
 
+        # What the chart plots: the adjusted line shifted so it ends at the
+        # current value. Same shape (only price moves change it), but the
+        # hover values read like portfolio values instead of starting from
+        # whatever the collection was worth at the range start.
+        for point in points:
+            point["value"] = round(point.pop("_adjusted") + cumulative, 2)
+
         last = points[-1]
         return {
             "start": _iso(start),
@@ -305,6 +312,7 @@ class Performance:
             "start_value": round(start_value, 2),
             "end_raw_value": last["raw_value"],
             "end_adjusted_value": last["adjusted_value"],
+            "end_value": last["value"],
             "net_flows": round(cumulative, 2),
             "change": last["change"],
             "change_pct": last["change_pct"],
@@ -327,6 +335,7 @@ def _point(
         "net_flow": round(net_flow, 2),
         "cumulative_net_flow": round(cumulative, 2),
         "adjusted_value": round(adjusted, 2),
+        "_adjusted": adjusted,
         "change": round(adjusted - start_value, 2),
         "change_pct": round((growth - 1) * 100, 2),
     }

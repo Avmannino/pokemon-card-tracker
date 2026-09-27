@@ -68,9 +68,9 @@ function LineChart({ points, hoveredIndex, onHover }) {
   const padX = 6;
   const padY = 14;
 
-  // The performance line: raw value minus cards added/removed in the
-  // range, so only market movement moves it.
-  const values = points.map((point) => point.adjusted_value);
+  // The performance line, anchored to the current value: only market
+  // movement moves it, never cards added or removed.
+  const values = points.map((point) => point.value);
   const times = points.map((point) => new Date(point.timestamp).getTime());
   const firstTime = times[0];
   const timeSpan = times[times.length - 1] - firstTime || 1;
@@ -84,11 +84,11 @@ function LineChart({ points, hoveredIndex, onHover }) {
     y:
       height -
       padY -
-      ((point.adjusted_value - minValue) / span) * (height - padY * 2),
+      ((point.value - minValue) / span) * (height - padY * 2),
   }));
 
   const isPositive =
-    points[points.length - 1].adjusted_value >= points[0].adjusted_value;
+    points[points.length - 1].value >= points[0].value;
   const stroke = isPositive ? "#5fe3a4" : "#f18a8a";
   const fillId = isPositive ? "chart-fill-up" : "chart-fill-down";
 
@@ -336,9 +336,7 @@ function Dashboard({ refreshKey }) {
               <div className="chart-value-row">
                 <strong>
                   {money(
-                    activePoint
-                      ? activePoint.adjusted_value
-                      : data.current_total_value
+                    activePoint ? activePoint.value : data.current_total_value
                   )}
                 </strong>
 
