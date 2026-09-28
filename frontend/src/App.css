@@ -557,6 +557,29 @@ h2 {
   margin-top: 10px;
 }
 
+.chart-tooltip {
+  position: absolute;
+
+  z-index: 2;
+
+  padding: 5px 9px;
+
+  border: 1px solid #2c3546;
+
+  border-radius: 8px;
+
+  background: rgba(11, 15, 23, 0.94);
+
+  color: #dfe4ef;
+
+  font-size: 0.74rem;
+  font-weight: 700;
+
+  white-space: nowrap;
+
+  pointer-events: none;
+}
+
 .chart-note {
   flex-shrink: 0;
 

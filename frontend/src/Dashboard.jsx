@@ -62,7 +62,7 @@ function ChangeBadge({ change, changePct }) {
   );
 }
 
-function LineChart({ points, hoveredIndex, onHover }) {
+function LineChart({ points, hoveredIndex, onHover, formatLabel }) {
   const width = 640;
   const height = 200;
   const padX = 6;
@@ -208,6 +208,27 @@ function LineChart({ points, hoveredIndex, onHover }) {
           </>
         )}
       </svg>
+
+      {hovered && (
+        <div
+          className="chart-tooltip"
+          style={{
+            left: `${(hovered.x / width) * 100}%`,
+            top: `${(hovered.y / height) * 100}%`,
+            // Keep it on screen near the edges, and below the dot when the
+            // line is near the top.
+            transform: `translate(${
+              hovered.x / width < 0.12
+                ? "0%"
+                : hovered.x / width > 0.88
+                  ? "-100%"
+                  : "-50%"
+            }, ${hovered.y / height < 0.3 ? "14px" : "calc(-100% - 14px)"})`,
+          }}
+        >
+          {formatLabel(points[hoveredIndex].timestamp)}
+        </div>
+      )}
     </div>
   );
 }
@@ -374,6 +395,9 @@ function Dashboard({ refreshKey }) {
               points={points}
               hoveredIndex={hoveredIndex}
               onHover={setHoveredIndex}
+              formatLabel={(timestamp) =>
+                formatTimestamp(timestamp, TIMED_RANGES.has(range))
+              }
             />
           )}
 
