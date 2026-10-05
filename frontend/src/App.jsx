@@ -13,12 +13,9 @@ import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import Dashboard from "./Dashboard.jsx";
 import { money, cardTitle, gradeLabel, percent } from "./format.js";
 
-const GRADES = ["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"];
-
-// Grades that get their own column in the collection table. PSA 7 is still
-// ownable and still enterable via the PSA values modal, it just isn't worth
-// a column.
-const TABLE_GRADES = GRADES.filter((grade) => grade !== "PSA_7");
+// Grades you can own and track. PSA 7 isn't tracked.
+const GRADES = ["RAW", "PSA_8", "PSA_9", "PSA_10"];
+const TABLE_GRADES = GRADES;
 const SEARCH_PAGE_SIZE = 10;
 
 function pullTime(iso) {
@@ -162,7 +159,7 @@ function emptyAddForm(card = null) {
   };
 }
 
-const PSA_GRADES = ["PSA_7", "PSA_8", "PSA_9", "PSA_10"];
+const PSA_GRADES = ["PSA_8", "PSA_9", "PSA_10"];
 
 // Opens the PSA values modal pre-filled from what you last entered for this
 // card: the same source and URL (kept until you clear it with the X), and
@@ -191,7 +188,6 @@ function emptyPsaForm(item = null) {
     item,
     source: latest?.source || "PSA CardFacts — Average Price",
     source_url: latest?.source_url || "",
-    psa_7: currentValue("PSA_7"),
     psa_8: currentValue("PSA_8"),
     psa_9: currentValue("PSA_9"),
     psa_10: currentValue("PSA_10"),
@@ -525,7 +521,6 @@ function App() {
       await saveGradedValues(psaForm.item.card.id, {
         source: psaForm.source.trim(),
         source_url: psaForm.source_url.trim() || null,
-        psa_7: toNumberOrNull(psaForm.psa_7),
         psa_8: toNumberOrNull(psaForm.psa_8),
         psa_9: toNumberOrNull(psaForm.psa_9),
         psa_10: toNumberOrNull(psaForm.psa_10),
@@ -1270,13 +1265,12 @@ function App() {
 
             <div className="grade-input-grid">
               {[
-                "psa_7",
                 "psa_8",
                 "psa_9",
                 "psa_10",
               ].map((field, index) => (
                 <label key={field}>
-                  PSA {index + 7}
+                  PSA {index + 8}
 
                   <input
                     type="number"

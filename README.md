@@ -10,13 +10,13 @@ A free-first personal Pokémon card collection tracker built with:
 ## What this first version does
 
 - Search Pokémon cards.
-- Add raw or PSA 7/8/9/10 copies to your collection.
+- Add raw or PSA 8/9/10 copies to your collection.
 - Pull raw pricing automatically twice a day (once AM, once PM) from:
   - eBay raw sold-sale averages returned by PokeTrace.
   - TCGPlayer raw market data returned by PokeTrace.
 - Store every price pull as a historical snapshot.
 - Calculate a current market estimate from the newest value from each source.
-- Manually add PSA 7–10 values from legitimate public comps without scraping.
+- Manually add PSA 8–10 values from legitimate public comps without scraping.
 - Calculate your known collection value from the grade you actually own.
 
 ## Important free-tier limitation
@@ -267,7 +267,6 @@ http://localhost:5173
 4. Click **Add**.
 5. Choose what you own:
    - Raw
-   - PSA 7
    - PSA 8
    - PSA 9
    - PSA 10
@@ -280,7 +279,7 @@ data and stores separate source snapshots.
 
 ---
 
-# 8. Add PSA 7–10 values for free
+# 8. Add PSA 8–10 values for free
 
 This part is manual in the first version because the free PokeTrace API does
 not return graded values.
@@ -308,7 +307,7 @@ https://www.psacard.com/cardfacts
 7. Leave the source name as:
    `PSA CardFacts — Average Price`
 8. Paste the exact CardFacts page URL into **Source page URL**.
-9. Enter the values for PSA 7, PSA 8, PSA 9 and PSA 10.
+9. Enter the values for PSA 8, PSA 9 and PSA 10.
 10. Click **Save PSA Values**.
 
 If you later add a second legitimate source, use a different source name.
