@@ -162,15 +162,39 @@ function emptyAddForm(card = null) {
   };
 }
 
+const PSA_GRADES = ["PSA_7", "PSA_8", "PSA_9", "PSA_10"];
+
+// Opens the PSA values modal pre-filled from what you last entered for this
+// card: the same source and URL (kept until you clear it with the X), and
+// your current manual values, so updating is just changing the numbers.
 function emptyPsaForm(item = null) {
+  const manualEntries = PSA_GRADES.flatMap(
+    (grade) => item?.market_values?.[grade]?.sources || []
+  ).filter((source) => source.metadata?.entry_method === "manual");
+
+  const latest = manualEntries.reduce(
+    (newest, entry) =>
+      !newest || (entry.observed_at || "") > (newest.observed_at || "")
+        ? entry
+        : newest,
+    null
+  );
+
+  const currentValue = (grade) => {
+    const values = item?.market_values?.[grade];
+    return values?.is_manual && values.estimate !== null
+      ? String(values.estimate)
+      : "";
+  };
+
   return {
     item,
-    source: "PSA CardFacts — Average Price",
-    source_url: "",
-    psa_7: "",
-    psa_8: "",
-    psa_9: "",
-    psa_10: "",
+    source: latest?.source || "PSA CardFacts — Average Price",
+    source_url: latest?.source_url || "",
+    psa_7: currentValue("PSA_7"),
+    psa_8: currentValue("PSA_8"),
+    psa_9: currentValue("PSA_9"),
+    psa_10: currentValue("PSA_10"),
   };
 }
 
@@ -1211,18 +1235,37 @@ function App() {
             <label>
               Source page URL (recommended)
 
-              <input
-                type="url"
-                value={psaForm.source_url}
-                onChange={(event) =>
-                  setPsaForm((current) => ({
-                    ...current,
-                    source_url:
-                      event.target.value,
-                  }))
-                }
-                placeholder="https://..."
-              />
+              <div className="url-input-row">
+                <input
+                  type="url"
+                  value={psaForm.source_url}
+                  onChange={(event) =>
+                    setPsaForm((current) => ({
+                      ...current,
+                      source_url:
+                        event.target.value,
+                    }))
+                  }
+                  placeholder="https://..."
+                />
+
+                {psaForm.source_url && (
+                  <button
+                    type="button"
+                    className="url-clear-button"
+                    aria-label="Remove source URL"
+                    title="Remove source URL"
+                    onClick={() =>
+                      setPsaForm((current) => ({
+                        ...current,
+                        source_url: "",
+                      }))
+                    }
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </label>
 
             <div className="grade-input-grid">
