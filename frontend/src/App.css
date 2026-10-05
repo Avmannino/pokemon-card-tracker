@@ -1745,6 +1745,37 @@ a.manual-source-link:hover {
   resize: vertical;
 }
 
+.url-input-row {
+  position: relative;
+}
+
+.url-input-row input {
+  padding-right: 38px;
+}
+
+.url-clear-button {
+  position: absolute;
+
+  top: calc(50% + 3px);
+  right: 8px;
+
+  transform: translateY(-50%);
+
+  padding: 0 6px;
+
+  background: transparent;
+
+  color: #758097;
+
+  font-size: 1.25rem;
+
+  line-height: 1;
+}
+
+.url-clear-button:hover {
+  color: #f18a8a;
+}
+
 .grade-input-grid {
   display: grid;
 
