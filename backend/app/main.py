@@ -57,10 +57,8 @@ def serialize_collection_item(
         "card": card,
         "market_values": market_values,
         "owned_market_value_each": owned_estimate,
-        # Always the raw price's movement, whatever grade is owned: graded
-        # values are entered by hand or pulled sparsely, so they rarely have
-        # enough history to show a change.
-        "week_change": value_change(snapshots, "RAW"),
+        # The price movement of the grade you own (raw or PSA).
+        "week_change": value_change(snapshots, owned_grade),
         "owned_market_value_total": (
             round(owned_estimate * quantity, 2)
             if owned_estimate is not None

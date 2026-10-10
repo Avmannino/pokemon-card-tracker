@@ -76,7 +76,7 @@ function syncSummary(status) {
   );
 }
 
-function TrendBadge({ week }) {
+function TrendBadge({ week, grade }) {
   if (!week) {
     return null;
   }
@@ -87,7 +87,7 @@ function TrendBadge({ week }) {
         className="trend-arrow flat"
         title={
           week.has_history
-            ? "Raw value unchanged over the past week"
+            ? `${gradeLabel(grade)} value unchanged over the past week`
             : "Not enough price history yet"
         }
       >
@@ -101,7 +101,7 @@ function TrendBadge({ week }) {
   return (
     <span
       className={`trend-arrow ${up ? "up" : "down"}`}
-      title="Raw value over the past week"
+      title={`${gradeLabel(grade)} value over the past week`}
     >
       {up ? "▲ +" : "▼ −"}
       {money(Math.abs(week.change))}
@@ -932,7 +932,7 @@ function App() {
                           <strong>
                             {cardTitle(item.card)}
 
-                            <TrendBadge week={item.week_change} />
+                            <TrendBadge week={item.week_change} grade={item.ownership_grade} />
                           </strong>
 
                           <span>
