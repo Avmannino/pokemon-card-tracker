@@ -317,83 +317,68 @@ The app will calculate the median of the newest value from each source.
 
 # 9. How prices refresh
 
-Market prices are pulled **twice a day** — once in the AM and once in the PM —
-by a scheduler that runs inside the FastAPI backend
-(`backend/app/services/price_sync.py`):
+Prices are pulled from the pricing APIs **only** in these cases. Loading or
+refreshing the page never calls them; it only reads what's saved in Supabase.
 
-- **Raw** prices come from PokeTrace.
-- **Graded** (PSA 7–10) prices come from TCGGO's eBay sold medians, and are
-  only pulled when `RAPIDAPI_KEY` is set in `backend/.env`. Each value is the
-  median of up to the last 5 eBay sales for that grade, in USD. Cards with no
-  recent graded sales get nothing, so manual PSA entry still matters.
+1. **Twice a day** by the GitHub Action (`.github/workflows/price-sync.yml`),
+   which wakes the Render backend and calls `POST /api/refresh-now`.
+2. When you press **Refresh Prices** (same endpoint, 15-minute cooldown).
+3. When you add a card or change its variant (one PokeTrace request for that
+   card).
 
-Each source is tracked separately and runs at most once per slot. Nothing
-else pulls prices: the
-**Refresh Prices** button only re-reads what is already stored in your
-database, and adding a card does not trigger a pull (its price appears at the
-next scheduled pull).
+Searching is also live: each search is one PokeTrace request.
 
-Default times are 8:00 AM and 8:00 PM (server-local). Change them in
-`backend/.env`:
+What a sync does:
 
-```text
-REFRESH_AM_TIME=08:00
-REFRESH_PM_TIME=20:00
-```
-
-Details:
-
-- The pull runs only while the backend is running. If the backend was off at
-  a scheduled time, it catches up once on startup, then resumes the schedule.
-- Which slot last ran is saved in `backend/.price_sync_state.json`, so
-  restarts (including `uvicorn --reload`) never trigger a second pull for the
-  same slot.
-- A failed pull is not retried until the next slot. If PokeTrace reports a
-  rate limit, the pull stops immediately instead of spending more requests.
-- The raw pull waits 2.1 seconds between calls (free burst limit) and is
-  capped at 100 unique cards per pull so two pulls stay under PokeTrace's
-  250-request daily allowance.
-- The graded pull is capped at 40 cards per pull. TCGGO's free plan is a hard
-  100 requests/day, and a card costs two requests the first time it is seen
-  (id lookup + prices). Resolved ids are cached in `backend/.tcggo_ids.json`,
-  so later pulls cost one request per card.
-- Searching is still live: each search is one PokeTrace request.
+- **Raw** prices come from PokeTrace, looked up 20 TCGPlayer products per
+  request. A product's response includes every variant, and each card is
+  matched to its exact saved PokeTrace id and variant. A different variant
+  is never used in its place. A card held in several collection rows is
+  looked up once.
+- **Graded** (PSA 8–10) prices come from TCGGO's eBay sold medians, only when
+  `RAPIDAPI_KEY` is set. Cards you own graded are pulled first. TCGGO matches
+  on the TCGPlayer product, so cards whose product has several variants
+  (e.g. Holo and Reverse Holo) are skipped without a request.
+- **Quota safety:** both APIs report remaining requests in response headers,
+  and the app stores them. A sync stops when PokeTrace is down to 20
+  requests, leaving room for searches and new cards. Graded pulls stop
+  before TCGGO's daily quota would go into paid overage, keeping enough for
+  the scheduled syncs before the reset. A graded failure never affects raw
+  prices that were already saved.
 
 ---
 
 # 10. How the valuation works
 
-For each grade, the app looks at the newest saved value from each source.
+Only the newest snapshot from each source counts. Then, per grade:
 
-Example raw snapshots:
+1. **Your manual entry wins.** A PSA value you enter overrides automated data
+   for that grade. Several manual entries are blended by median.
+2. **Raw cards** use Near Mint prices for the exact variant only:
+   - TCGPlayer's Near Mint market price is the primary signal.
+   - eBay's Near Mint 30-day sold median confirms it. When the two agree,
+     eBay is blended in, up to 50/50. The further apart they are, the less
+     eBay counts. Past a 50% difference it isn't used at all, and the value is
+     flagged as low-confidence. The weighting is continuous, so a value
+     never jumps just because two sources crossed a threshold.
+   - Other conditions (LP, MP, ...) and other variants are never used.
+3. **Graded cards** without a manual entry use TCGGO's median only if it comes
+   from at least 3 sales and the card's product has a single variant.
+   Otherwise the value is left blank, with the reason.
 
-```text
-eBay raw sold average (via PokeTrace)    $285
-TCGPlayer raw market (via PokeTrace)     $299
-```
+**Details** on a collection card shows how each value was reached: the
+method, confidence, each source's value, sale count and date, and whether it
+was used, blended in or excluded (and why).
 
-The current estimate is the median:
-
-```text
-$292
-```
-
-If you eventually enter three independent PSA 10 sources:
-
-```text
-PSA CardFacts              $300
-Source B                   $287
-Source C                   $295
-```
-
-the estimate is:
-
-```text
-$295
-```
-
-Using only the newest value per source prevents one source from receiving more
-weight merely because it was refreshed more often.
+**Variants:** every PokeTrace card id is one variant. Search results, the Add
+form and the collection show the variant, and warn when the same card also
+comes as another variant. A card whose printing has other variants shows
+**Confirm variant** until you confirm or correct it. Correcting it is booked
+like a trade: the wrong variant leaves at its value and the right one joins
+at its own. The performance chart shows no gain or loss from the
+correction, and each card's price history stays a single variant. Old
+snapshots are left untouched on the old card. Prices you entered by hand for
+graded grades carry over, since they describe the card you own.
 
 ---
 
@@ -417,6 +402,7 @@ pokemon-card-tracker/
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── poketrace.py
+│   │       ├── state_store.py
 │   │       ├── tcggo.py
 │   │       ├── portfolio.py
 │   │       ├── price_sync.py

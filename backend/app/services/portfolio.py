@@ -34,7 +34,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .valuation import estimate_from_sources, is_manual_entry
+from .valuation import (
+    estimate_from_sources,
+    grade_label,
+    is_manual_entry,
+    is_variant_ambiguous,
+)
 
 
 # Chart ranges and how far back each looks. A range longer than the
@@ -101,7 +106,14 @@ class PriceSeries:
       entries are real changes from when you made them.
     """
 
-    def __init__(self, snapshots: list[dict[str, Any]], grade: str) -> None:
+    def __init__(
+        self,
+        snapshots: list[dict[str, Any]],
+        grade: str,
+        card: dict[str, Any] | None = None,
+    ) -> None:
+        variant = (card or {}).get("variant")
+        ambiguous = is_variant_ambiguous(card)
         rows = sorted(
             (row for row in snapshots if row.get("grade") == grade),
             key=lambda row: (parse_ts(row["observed_at"]), row.get("id") or 0),
@@ -124,7 +136,7 @@ class PriceSeries:
             if first_manual is not None and observed < first_manual:
                 continue
 
-            estimate, _ = estimate_from_sources(latest.values())
+            estimate, _ = estimate_from_sources(latest.values(), grade, variant, ambiguous)
             if estimate is None:
                 continue
 
@@ -407,7 +419,7 @@ def build_lots(
 
         key = (card_id, grade)
         if key not in series_by_key:
-            series_by_key[key] = PriceSeries(snapshots_by_card.get(card_id, []), grade)
+            series_by_key[key] = PriceSeries(snapshots_by_card.get(card_id, []), grade, card)
 
         lots.append(
             Lot(
@@ -434,6 +446,7 @@ def lot_price(
     grade: str,
     added_at: Any,
     moment: Any,
+    card: dict[str, Any] | None = None,
 ) -> float | None:
     """Market value per card of a lot at `moment`, valued exactly the way
     the performance history values it (used to record ADD/REMOVE events)."""
@@ -444,7 +457,7 @@ def lot_price(
         added_at=parse_ts(added_at),
         quantity=0,
         removals=[],
-        series=PriceSeries(snapshots, grade),
+        series=PriceSeries(snapshots, grade, card),
     )
     return lot.price(parse_ts(moment))
 
@@ -621,24 +634,33 @@ def value_change(
     grade: str,
     days_back: int = 7,
     now: datetime | None = None,
-) -> dict[str, Any] | None:
-    """Change in one card's market price for `grade` over the last
-    `days_back` days, or None when there isn't a price for it yet."""
+    card: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """How the market price of `grade` - the grade you own - moved over the
+    last `days_back` days. Never substitutes another grade: a PSA 10 with no
+    PSA 10 history reports that, not the raw card's movement."""
     now = now or datetime.now(timezone.utc)
-    series = PriceSeries(snapshots, grade)
+    series = PriceSeries(snapshots, grade, card)
 
     current = series.at(now)
     past = series.at(now - timedelta(days=days_back))
+    has_price = current is not None and past is not None
 
-    if current is None or past is None:
-        return None
-
-    change = round(current - past, 2)
-
-    return {
-        "change": change,
-        "change_pct": round((change / past) * 100, 2) if past else None,
-        # False while the card has only one day of prices on record, so a $0
+    result = {
+        "grade": grade,
+        "grade_label": grade_label(grade),
+        "window_days": days_back,
+        "has_price": has_price,
+        # False while there's only one day of prices for this grade, so a $0
         # change means "no history yet" rather than "hasn't moved".
-        "has_history": len(series.observed_days) > 1,
+        "has_history": has_price and len(series.observed_days) > 1,
+        "change": None,
+        "change_pct": None,
     }
+
+    if has_price:
+        change = round(current - past, 2)
+        result["change"] = change
+        result["change_pct"] = round((change / past) * 100, 2) if past else None
+
+    return result

@@ -115,3 +115,10 @@ where not exists (
     where e.collection_item_id = ci.id
       and e.event_type = 'ADD'
 );
+
+-- Variant identity (also in supabase/migrations/2026-10-10_variant_identity.sql).
+alter table public.cards
+    add column if not exists variant_siblings jsonb;
+
+alter table public.collection_items
+    add column if not exists variant_confirmed_at timestamptz;

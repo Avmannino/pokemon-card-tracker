@@ -19,7 +19,7 @@ BASE_URL = f"https://{HOST}"
 SOURCE_LABEL = "eBay graded sold median (via TCGGO)"
 
 # PSA grades the app tracks.
-PSA_GRADES = ("7", "8", "9", "10")
+PSA_GRADES = ("8", "9", "10")
 
 # RapidAPI Basic plan: 30 requests/minute.
 REQUEST_SPACING_SECONDS = 2.1

@@ -1,3 +1,4 @@
+import logging
 import threading
 from datetime import datetime, timezone
 from typing import Any
@@ -97,6 +98,51 @@ def update_marketplace_urls(card_id: str, extra: dict[str, Any]) -> None:
     _client().table("cards").update({"marketplace_urls": merged}).eq(
         "id", card_id
     ).execute()
+
+
+# Columns added by supabase/migrations/2026-10-10_variant_identity.sql. Until
+# that's run, writing them fails; those writes are skipped (and reported)
+# rather than breaking the request they're part of.
+_missing_columns: set[str] = set()
+
+
+def _optional_update(table: str, row_id: str, column: str, value: Any) -> bool:
+    if column in _missing_columns:
+        return False
+
+    try:
+        _client().table(table).update({column: value}).eq("id", row_id).execute()
+        return True
+    except Exception as exc:
+        if column in str(exc) or "PGRST204" in str(exc):
+            _missing_columns.add(column)
+            logging.getLogger("db").warning(
+                "%s.%s doesn't exist yet; run "
+                "supabase/migrations/2026-10-10_variant_identity.sql",
+                table,
+                column,
+            )
+            return False
+        raise
+
+
+def update_card_variant_siblings(card_id: str, siblings: dict[str, Any] | None) -> bool:
+    if siblings is None:
+        return False
+    return _optional_update("cards", card_id, "variant_siblings", siblings)
+
+
+def set_item_variant_confirmed(item_id: str, confirmed: bool = True) -> bool:
+    return _optional_update(
+        "collection_items",
+        item_id,
+        "variant_confirmed_at",
+        utc_now_iso() if confirmed else None,
+    )
+
+
+def migration_applied() -> bool:
+    return not _missing_columns
 
 
 def add_collection_item(

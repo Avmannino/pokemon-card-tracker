@@ -1,6 +1,6 @@
 """Cash-flow-neutral performance accounting (app/services/portfolio.py).
 
-Run from backend/:  python -m unittest discover -s tests -v
+Run from backend/:  python -m unittest discover -t . -s tests -v
 """
 
 import unittest

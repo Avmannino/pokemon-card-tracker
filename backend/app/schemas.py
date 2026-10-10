@@ -19,12 +19,31 @@ class SearchCard(BaseModel):
     marketplace_urls: dict[str, str | None] = Field(default_factory=dict)
 
 
+class VariantOption(BaseModel):
+    poketrace_id: str
+    variant: str | None = None
+    image_url: str | None = None
+    rarity: str | None = None
+    raw_market_estimate: float | None = None
+
+
 class AddCollectionRequest(BaseModel):
     card: SearchCard
     quantity: int = Field(default=1, ge=1, le=100)
     ownership_grade: Grade = "RAW"
     purchase_price: float | None = Field(default=None, ge=0)
     notes: str | None = Field(default=None, max_length=2000)
+    # The add form shows the variant prominently and asks you to check it,
+    # so a card added through it counts as variant-confirmed.
+    variant_confirmed: bool = False
+    # Other variants of the same printing seen in the search results.
+    variant_siblings: list[VariantOption] | None = None
+
+
+class VariantChangeRequest(BaseModel):
+    # PokeTrace id of the variant you actually own; the card's current id
+    # just confirms it.
+    poketrace_id: str = Field(min_length=8, max_length=64)
 
 
 class GradedValuesRequest(BaseModel):

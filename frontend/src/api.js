@@ -57,6 +57,15 @@ export function deleteCollectionItem(itemId, quantity) {
   });
 }
 
+// Confirms (same id) or corrects (another variant of the printing) which
+// variant a collection card is.
+export function setCollectionVariant(itemId, poketraceId) {
+  return request(`/api/collection/${itemId}/variant`, {
+    method: "POST",
+    body: JSON.stringify({ poketrace_id: poketraceId }),
+  });
+}
+
 export function getRefreshStatus() {
   return request("/api/refresh-status");
 }

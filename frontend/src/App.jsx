@@ -7,11 +7,19 @@ import {
   getRefreshStatus,
   saveGradedValues,
   searchCards,
+  setCollectionVariant,
   startSync,
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import Dashboard from "./Dashboard.jsx";
-import { money, cardTitle, gradeLabel, percent } from "./format.js";
+import {
+  money,
+  cardTitle,
+  gradeLabel,
+  percent,
+  printingKey,
+  variantLabel,
+} from "./format.js";
 
 // Grades you can own and track. PSA 7 isn't tracked.
 const GRADES = ["RAW", "PSA_8", "PSA_9", "PSA_10"];
@@ -76,38 +84,73 @@ function syncSummary(status) {
   );
 }
 
-function TrendBadge({ week, grade }) {
-  if (!week) {
+// The weekly move of the grade you own - a PSA 10 shows PSA 10 movement,
+// never the raw card's.
+function TrendBadge({ change }) {
+  if (!change) {
     return null;
   }
 
-  if (!week.change) {
+  const label = change.grade_label || gradeLabel(change.grade || "RAW");
+
+  if (!change.has_history || change.change === null) {
     return (
       <span
         className="trend-arrow flat"
-        title={
-          week.has_history
-            ? `${gradeLabel(grade)} value unchanged over the past week`
-            : "Not enough price history yet"
-        }
+        title={`Not enough ${label} price history yet`}
       >
-        {week.has_history ? "▬ $0.00 (0.00%)" : "– New"}
+        – New
       </span>
     );
   }
 
-  const up = week.change > 0;
+  if (!change.change) {
+    return (
+      <span
+        className="trend-arrow flat"
+        title={`${label} value unchanged over the past week`}
+      >
+        ▬ $0.00 (0.00%)
+      </span>
+    );
+  }
+
+  const up = change.change > 0;
 
   return (
     <span
       className={`trend-arrow ${up ? "up" : "down"}`}
-      title={`${gradeLabel(grade)} value over the past week`}
+      title={`${label} value over the past week`}
     >
       {up ? "▲ +" : "▼ −"}
-      {money(Math.abs(week.change))}
-      {week.change_pct !== null && ` (${percent(week.change_pct)})`}
+      {money(Math.abs(change.change))}
+      {change.change_pct !== null && ` (${percent(change.change_pct)})`}
     </span>
   );
+}
+
+function VariantPill({ variant }) {
+  const label = variantLabel(variant);
+  if (!label) {
+    return null;
+  }
+
+  return (
+    <span className={`variant-pill variant-${variant.toLowerCase()}`}>
+      {label}
+    </span>
+  );
+}
+
+// What the zoom modal needs to explain an owned card's value.
+function ownedDetails(item) {
+  return {
+    grade: item.ownership_grade,
+    valueEach: item.owned_market_value_each,
+    quantity: item.quantity,
+    valuation: item.market_values?.[item.ownership_grade],
+    variant: item.card.variant,
+  };
 }
 
 function chunk(items, size) {
@@ -221,6 +264,9 @@ function App() {
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
+  const [variantItem, setVariantItem] = useState(null);
+  const [variantChoice, setVariantChoice] = useState("");
+  const [savingVariant, setSavingVariant] = useState(false);
   const [dashboardVersion, setDashboardVersion] = useState(0);
   const { zoomedCard, openZoom, closeZoom } = useCardZoom();
 
@@ -365,6 +411,27 @@ function App() {
     );
   }
 
+  // Search results that are variants of the same printing, so each result
+  // can show the variants it's easy to confuse it with.
+  const searchVariants = useMemo(() => {
+    const groups = {};
+
+    for (const card of searchResults) {
+      const key = printingKey(card);
+      if (key) {
+        groups[key] = [...(groups[key] || []), card];
+      }
+    }
+
+    return groups;
+  }, [searchResults]);
+
+  function otherVariants(card) {
+    return (searchVariants[printingKey(card)] || []).filter(
+      (other) => other.poketrace_id !== card.poketrace_id
+    );
+  }
+
   const searchPages = useMemo(
     () => chunk(searchResults, SEARCH_PAGE_SIZE),
     [searchResults]
@@ -418,6 +485,15 @@ function App() {
             ? null
             : Number(addForm.purchase_price),
         notes: addForm.notes.trim() || null,
+        // You picked this variant with it shown above, so it's confirmed.
+        variant_confirmed: true,
+        variant_siblings: otherVariants(addForm.card).map((other) => ({
+          poketrace_id: other.poketrace_id,
+          variant: other.variant,
+          image_url: other.image_url,
+          rarity: other.rarity,
+          raw_market_estimate: other.raw_market_estimate,
+        })),
       };
 
       const result = await addCollectionItem(payload);
@@ -501,6 +577,38 @@ function App() {
       setMessage(syncSummary(status));
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    setVariantChoice(variantItem?.card.poketrace_id || "");
+  }, [variantItem]);
+
+  async function handleSaveVariant(event) {
+    event.preventDefault();
+
+    if (!variantItem || !variantChoice) {
+      return;
+    }
+
+    const switching = variantChoice !== variantItem.card.poketrace_id;
+    setSavingVariant(true);
+    setError("");
+    setMessage("");
+
+    try {
+      await setCollectionVariant(variantItem.id, variantChoice);
+      setVariantItem(null);
+      await loadCollection();
+      setMessage(
+        switching
+          ? "Variant changed. Its price now comes from the variant you own."
+          : "Variant confirmed."
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingVariant(false);
     }
   }
 
@@ -657,18 +765,23 @@ function App() {
                           </span>
 
                           <div className="search-result-meta">
+                            <VariantPill variant={card.variant} />
+
                             {card.rarity && (
                               <span className="rarity-pill">
                                 {card.rarity}
                               </span>
                             )}
-
-                            {card.variant && (
-                              <span className="variant-label">
-                                {card.variant}
-                              </span>
-                            )}
                           </div>
+
+                          {otherVariants(card).length > 0 && (
+                            <span className="variant-also">
+                              Also comes as{" "}
+                              {otherVariants(card)
+                                .map((other) => variantLabel(other.variant))
+                                .join(", ")}
+                            </span>
+                          )}
 
                           <div className="search-market-value">
                             <span>Raw market estimate</span>
@@ -836,12 +949,7 @@ function App() {
                     className="thumb-clickable"
                     src={item.card.image_url}
                     alt={cardTitle(item.card)}
-                    onClick={() =>
-                      openZoom(item.card, {
-                        grade: item.ownership_grade,
-                        valueEach: item.owned_market_value_each,
-                      })
-                    }
+                    onClick={() => openZoom(item.card, ownedDetails(item))}
                   />
                 ) : (
                   <div className="gallery-placeholder">No image</div>
@@ -857,6 +965,9 @@ function App() {
 
                 <span className="gallery-grade">
                   {gradeLabel(item.ownership_grade)}
+                  {variantLabel(item.card.variant)
+                    ? ` · ${variantLabel(item.card.variant)}`
+                    : ""}
                   {item.quantity > 1 ? ` · Qty ${item.quantity}` : ""}
                 </span>
               </article>
@@ -920,10 +1031,7 @@ function App() {
                             src={item.card.image_url}
                             alt={cardTitle(item.card)}
                             onClick={() =>
-                              openZoom(item.card, {
-                                grade: item.ownership_grade,
-                                valueEach: item.owned_market_value_each,
-                              })
+                              openZoom(item.card, ownedDetails(item))
                             }
                           />
                         )}
@@ -932,12 +1040,34 @@ function App() {
                           <strong>
                             {cardTitle(item.card)}
 
-                            <TrendBadge week={item.week_change} grade={item.ownership_grade} />
+                            <TrendBadge change={item.owned_grade_change} />
                           </strong>
 
                           <span>
                             {item.card.set_name ||
                               "Unknown set"}
+                          </span>
+
+                          <span className="table-variant-row">
+                            <VariantPill variant={item.card.variant} />
+
+                            {item.variant_info?.needs_confirmation ? (
+                              <button
+                                type="button"
+                                className="variant-confirm-button"
+                                onClick={() => setVariantItem(item)}
+                              >
+                                Confirm variant
+                              </button>
+                            ) : item.variant_info?.options?.length > 1 ? (
+                              <button
+                                type="button"
+                                className="text-button variant-change-link"
+                                onClick={() => setVariantItem(item)}
+                              >
+                                Change
+                              </button>
+                            ) : null}
                           </span>
                         </div>
                       </div>
@@ -1017,6 +1147,16 @@ function App() {
                           type="button"
                           className="text-button"
                           onClick={() =>
+                            openZoom(item.card, ownedDetails(item))
+                          }
+                        >
+                          Details
+                        </button>
+
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() =>
                             setPsaForm(
                               emptyPsaForm(item)
                             )
@@ -1072,6 +1212,21 @@ function App() {
                 <span>
                   {addForm.card.set_name}
                 </span>
+
+                <div className="add-variant-row">
+                  <span>Variant:</span>
+                  <VariantPill variant={addForm.card.variant} />
+                </div>
+
+                {otherVariants(addForm.card).length > 0 && (
+                  <p className="variant-warning">
+                    This card also comes as{" "}
+                    {otherVariants(addForm.card)
+                      .map((other) => variantLabel(other.variant))
+                      .join(", ")}
+                    , priced separately. Make sure this is the one you own.
+                  </p>
+                )}
               </div>
 
               <button
@@ -1311,6 +1466,88 @@ function App() {
 
               <button type="submit">
                 Save PSA Values
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {variantItem && (
+        <div className="modal-backdrop">
+          <form className="modal" onSubmit={handleSaveVariant}>
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">WHICH VARIANT DO YOU OWN?</p>
+                <h2>{cardTitle(variantItem.card)}</h2>
+                <span>{variantItem.card.set_name}</span>
+              </div>
+
+              <button
+                type="button"
+                className="close-button"
+                onClick={() => setVariantItem(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="modal-tip">
+              Each variant has its own market price. Reverse Holo has the
+              shine on the card body outside the artwork; Holo has it on the
+              artwork.
+            </p>
+
+            <div className="variant-options">
+              {(variantItem.variant_info?.options || []).map((option) => (
+                <label
+                  key={option.poketrace_id}
+                  className={`variant-option ${
+                    variantChoice === option.poketrace_id ? "selected" : ""
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="variant"
+                    value={option.poketrace_id}
+                    checked={variantChoice === option.poketrace_id}
+                    onChange={() => setVariantChoice(option.poketrace_id)}
+                  />
+
+                  {option.image_url && (
+                    <img src={option.image_url} alt={option.label || ""} />
+                  )}
+
+                  <span className="variant-option-copy">
+                    <strong>{option.label || variantLabel(option.variant)}</strong>
+                    <span>
+                      {option.raw_market_estimate !== null &&
+                      option.raw_market_estimate !== undefined
+                        ? `Raw ${money(option.raw_market_estimate)}`
+                        : "No raw price yet"}
+                      {option.poketrace_id === variantItem.card.poketrace_id
+                        ? " · saved now"
+                        : ""}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setVariantItem(null)}
+              >
+                Cancel
+              </button>
+
+              <button type="submit" disabled={savingVariant || !variantChoice}>
+                {savingVariant
+                  ? "Saving…"
+                  : variantChoice === variantItem.card.poketrace_id
+                    ? "Confirm variant"
+                    : "Switch variant"}
               </button>
             </div>
           </form>
