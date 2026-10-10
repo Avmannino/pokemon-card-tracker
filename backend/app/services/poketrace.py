@@ -37,6 +37,9 @@ REQUEST_SPACING_SECONDS = 2.1
 # need them).
 MIN_REMAINING = 2
 
+# Short-term 429s (requests still left today) are retried after 4s, 8s, 16s.
+RATE_LIMIT_RETRIES = 3
+
 RAW_TIER = "NEAR_MINT"
 
 # Stored source labels stay as they were so price history stays one series
@@ -145,24 +148,44 @@ async def _request(
             "stopped to keep requests for searches and new cards."
         )
 
-    wait = REQUEST_SPACING_SECONDS - (time.monotonic() - _last_request_at)
-    if wait > 0:
-        await asyncio.sleep(wait)
-    _last_request_at = time.monotonic()
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        wait = REQUEST_SPACING_SECONDS - (time.monotonic() - _last_request_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_request_at = time.monotonic()
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(
-            f"{BASE_URL}{path}",
-            headers=_headers(),
-            params=params,
-        )
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                f"{BASE_URL}{path}",
+                headers=_headers(),
+                params=params,
+            )
 
-    _remember_quota(response)
+        _remember_quota(response)
 
-    if response.status_code == 429:
-        raise PokeTraceRateLimited(
-            "PokeTrace rate limit reached. Free accounts allow 250 requests/day."
-        )
+        if response.status_code != 429:
+            break
+
+        # A 429 with requests still left today is PokeTrace's short-term
+        # limiter, which clears within seconds: back off and retry. Only a
+        # 429 with none left is the daily limit.
+        left = response.headers.get("x-ratelimit-remaining")
+        if left == "0":
+            raise PokeTraceRateLimited(
+                "PokeTrace daily limit reached (250 requests/day); it resets at "
+                f"{response.headers.get('x-ratelimit-reset', 'midnight UTC')}."
+            )
+
+        if attempt == RATE_LIMIT_RETRIES:
+            raise PokeTraceRateLimited(
+                "PokeTrace is temporarily rate-limiting requests"
+                + (f" ({left} of today's requests still left)" if left else "")
+                + ". Try again in a minute."
+            )
+
+        retry_after = response.headers.get("retry-after", "")
+        delay = float(retry_after) if retry_after.isdigit() else 4 * 2**attempt
+        await asyncio.sleep(min(delay, 30))
 
     if response.status_code == 403:
         detail = response.text

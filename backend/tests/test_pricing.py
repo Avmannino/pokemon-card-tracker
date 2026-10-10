@@ -285,6 +285,53 @@ class PokeTraceRequests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(poketrace.PokeTraceRateLimited):
                 await poketrace.get_cards_by_tcgplayer_ids(["1"], reserve=20)
 
+    def fake_client(self, responses):
+        """httpx client whose GETs return `responses` in order."""
+        import httpx
+
+        queue = list(responses)
+        real = httpx.AsyncClient
+
+        def handler(request):
+            status, headers = queue.pop(0)
+            return httpx.Response(status, headers=headers, json={"data": [{"id": "a"}]})
+
+        return mock.patch.object(
+            poketrace.httpx,
+            "AsyncClient",
+            lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+        ), queue
+
+    async def test_short_term_429_is_retried(self):
+        # Requests still left today: PokeTrace's burst limiter, not the cap.
+        patcher, queue = self.fake_client([
+            (429, {"x-ratelimit-remaining": "138"}),
+            (429, {"x-ratelimit-remaining": "137"}),
+            (200, {"x-ratelimit-remaining": "136"}),
+        ])
+        with patcher, mock.patch.object(poketrace.asyncio, "sleep", mock.AsyncMock()):
+            cards = await poketrace.get_cards_by_tcgplayer_ids(["1"])
+
+        self.assertEqual([c["id"] for c in cards], ["a"])
+        self.assertEqual(queue, [])
+
+    async def test_daily_limit_429_is_not_retried(self):
+        patcher, queue = self.fake_client([
+            (429, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "2026-10-11T00:00:00Z"}),
+            (200, {}),
+        ])
+        with patcher, mock.patch.object(poketrace.asyncio, "sleep", mock.AsyncMock()):
+            with self.assertRaisesRegex(poketrace.PokeTraceRateLimited, "daily limit"):
+                await poketrace.get_cards_by_tcgplayer_ids(["1"])
+
+        self.assertEqual(len(queue), 1)  # stopped after the first response
+
+    async def test_persistent_short_term_429_gives_an_accurate_message(self):
+        patcher, _ = self.fake_client([(429, {"x-ratelimit-remaining": "138"})] * 4)
+        with patcher, mock.patch.object(poketrace.asyncio, "sleep", mock.AsyncMock()):
+            with self.assertRaisesRegex(poketrace.PokeTraceRateLimited, "temporarily.*138"):
+                await poketrace.get_cards_by_tcgplayer_ids(["1"])
+
     async def test_batch_follows_pagination(self):
         pages = [
             {"data": [{"id": "a"}], "pagination": {"hasMore": True, "nextCursor": "c2"}},
