@@ -42,7 +42,10 @@ function refreshStatusText(status) {
   if (status.syncing && status.progress) {
     const { phase, done, total } = status.progress;
 
-    return `Syncing ${phase === "graded" ? "graded" : "raw"} prices… ${done}/${total}`;
+    const label =
+      { graded: "graded", pricecharting: "PriceCharting" }[phase] || "raw";
+
+    return `Syncing ${label} prices… ${done}/${total}`;
   }
 
   const last = status.last_pull_at
@@ -64,17 +67,24 @@ function syncSummary(status) {
   }
 
   const { raw, graded } = manual;
+  const pricecharting = manual.pricecharting || { attempted: 0, failed: 0 };
   const parts = [`raw prices updated for ${raw.succeeded} of ${raw.attempted} cards`];
+
+  if (pricecharting.attempted > 0) {
+    parts.push(
+      `PSA prices updated from PriceCharting for ${pricecharting.updated} of ${pricecharting.attempted}`
+    );
+  }
 
   if (graded.attempted > 0) {
     parts.push(`graded prices found for ${graded.with_data} of ${graded.attempted}`);
   }
 
-  const problems = [raw, graded]
+  const problems = [raw, pricecharting, graded]
     .map((part) => part.stopped_early)
     .filter(Boolean);
 
-  const failed = raw.failed + graded.failed;
+  const failed = raw.failed + graded.failed + pricecharting.failed;
 
   return (
     `Synced: ${parts.join("; ")}.` +
@@ -1096,9 +1106,14 @@ function App() {
                               href={item.market_values[item.ownership_grade].source_url}
                               target="_blank"
                               rel="noreferrer"
-                              title="Open the source you entered this price from"
+                              title={
+                                item.market_values[item.ownership_grade].auto_source
+                                  ? "Updated automatically each sync from this page"
+                                  : "Open the source you entered this price from"
+                              }
                             >
-                              Manual
+                              {item.market_values[item.ownership_grade].auto_source ||
+                                "Manual"}
                             </a>
                           ) : (
                             <span
@@ -1347,7 +1362,8 @@ function App() {
 
                 <span>
                   Enter values from a source you checked
-                  manually.
+                  manually. With a PriceCharting URL, the
+                  grade you own updates itself each sync.
                 </span>
               </div>
 

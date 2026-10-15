@@ -313,6 +313,13 @@ https://www.psacard.com/cardfacts
 If you later add a second legitimate source, use a different source name.
 The app will calculate the median of the newest value from each source.
 
+**PriceCharting links update themselves.** If the source URL is a
+PriceCharting card page, every sync re-reads that page for the grade you own
+(PSA 8 → "Grade 8", PSA 9 → "Grade 9", PSA 10 → "PSA 10") and replaces your
+price with it. The collection then shows **PriceCharting** instead of
+**Manual**. PriceCharting's Grade 8 and Grade 9 cover every grading company,
+not only PSA.
+
 ---
 
 # 9. How prices refresh
@@ -335,6 +342,11 @@ What a sync does:
   matched to its exact saved PokeTrace id and variant. A different variant
   is never used in its place. A card held in several collection rows is
   looked up once.
+- **PriceCharting:** for each card you own graded whose PSA price links to a
+  PriceCharting page, that page is read once (3 seconds apart) and only the
+  grade you own is updated. Cards without such a link are skipped. If
+  PriceCharting refuses a request, the rest are skipped and your prices stay
+  as they were.
 - **Graded** (PSA 8–10) prices come from TCGGO's eBay sold medians, only when
   `RAPIDAPI_KEY` is set. Cards you own graded are pulled first. TCGGO matches
   on the TCGPlayer product, so cards whose product has several variants
@@ -353,7 +365,10 @@ What a sync does:
 Only the newest snapshot from each source counts. Then, per grade:
 
 1. **Your manual entry wins.** A PSA value you enter overrides automated data
-   for that grade. Several manual entries are blended by median.
+   for that grade. Several manual entries are blended by median. A value a
+   sync re-read from your PriceCharting link counts as your entry and
+   replaces the one it came from. It's charted as a market move, not a
+   correction.
 2. **Raw cards** use Near Mint prices for the exact variant only:
    - TCGPlayer's Near Mint market price is the primary signal.
    - eBay's Near Mint 30-day sold median confirms it. When the two agree,

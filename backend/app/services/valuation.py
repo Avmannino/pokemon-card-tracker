@@ -63,7 +63,14 @@ def _meta(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def is_manual_entry(row: dict[str, Any]) -> bool:
-    return _meta(row).get("entry_method") == "manual"
+    """Your own price for a grade: typed in, or re-read by a sync from the
+    PriceCharting page you linked it to."""
+    return _meta(row).get("entry_method") in ("manual", "pricecharting")
+
+
+def is_auto_refreshed(row: dict[str, Any]) -> bool:
+    """A manual price that a sync re-read from its PriceCharting page."""
+    return _meta(row).get("entry_method") == "pricecharting"
 
 
 def grade_label(grade: str) -> str:
@@ -98,6 +105,8 @@ def is_variant_ambiguous(card: dict[str, Any] | None) -> bool:
 
 
 def source_kind(row: dict[str, Any]) -> str:
+    if is_auto_refreshed(row):
+        return "pricecharting"
     if is_manual_entry(row):
         return "manual"
 
@@ -380,6 +389,12 @@ def _evaluate_graded(rows, grade, variant_ambiguous) -> dict[str, Any]:
     }
 
 
+def _auto_note(manual_rows: list[dict[str, Any]]) -> str:
+    if any(is_auto_refreshed(row) for row in manual_rows):
+        return ", kept up to date from PriceCharting"
+    return ""
+
+
 def evaluate(
     grade: str,
     latest_rows,
@@ -394,7 +409,14 @@ def evaluate(
     if manual_rows:
         values = [v for v in (_as_float(r.get("value")) for r in manual_rows) if v is not None]
         components = [
-            _component(row, "manual", _as_float(row.get("value")), "primary")
+            _component(
+                row, source_kind(row), _as_float(row.get("value")), "primary",
+                label=(
+                    f"PriceCharting {_meta(row).get('price_label')} (auto-updated)"
+                    if is_auto_refreshed(row)
+                    else None
+                ),
+            )
             for row in manual_rows
         ] + [
             _component(
@@ -409,9 +431,9 @@ def evaluate(
             "estimate": round(float(median(values)), 2) if values else None,
             "method": "manual",
             "summary": (
-                "Your manual price."
+                f"Your manual price{_auto_note(manual_rows)}."
                 if len(values) == 1
-                else f"Median of your {len(values)} manual prices."
+                else f"Median of your {len(values)} manual prices{_auto_note(manual_rows)}."
             ),
             "confidence": "MANUAL",
             "divergence": None,
@@ -477,10 +499,12 @@ def build_market_values(
         # was checked. With more than one manual source, link the most
         # recently entered one.
         manual_url = None
+        newest_manual = None
         if is_manual:
-            manual_url = max(
+            newest_manual = max(
                 manual_sources, key=lambda row: row.get("observed_at") or ""
-            ).get("source_url")
+            )
+            manual_url = newest_manual.get("source_url")
 
         last_updated = max((row.get("observed_at") or "" for row in sources), default=None) or None
 
@@ -489,6 +513,12 @@ def build_market_values(
             "confidence": valuation["confidence"],
             "is_manual": is_manual,
             "source_url": manual_url,
+            # Set when a sync last updated your price from its page.
+            "auto_source": (
+                "PriceCharting"
+                if newest_manual and is_auto_refreshed(newest_manual)
+                else None
+            ),
             "source_count": len(valuation["used_values"]),
             "method": valuation["method"],
             "summary": valuation["summary"],

@@ -9,8 +9,8 @@ from zoneinfo import ZoneInfo
 
 from .. import db
 from ..config import settings
-from . import poketrace, state_store, tcggo
-from .valuation import is_variant_ambiguous
+from . import poketrace, pricecharting, state_store, tcggo
+from .valuation import is_manual_entry, is_variant_ambiguous, latest_by_source
 
 
 logger = logging.getLogger("price_sync")
@@ -169,6 +169,18 @@ def _new_graded_record() -> dict[str, Any]:
     }
 
 
+def _new_pricecharting_record() -> dict[str, Any]:
+    return {
+        "attempted": 0,
+        "updated": 0,
+        "no_price": 0,
+        "failed": 0,
+        "requests": 0,
+        "stopped_early": None,
+        "issues": [],
+    }
+
+
 def _card_ids_for_pull(
     limit: int,
     graded_first: bool = False,
@@ -293,6 +305,83 @@ async def _pull_raw(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
         record["stopped_early"] = str(exc)
 
     return siblings_by_card
+
+
+async def _pull_pricecharting(record: dict[str, Any]) -> None:
+    """Re-reads your PSA prices from the PriceCharting pages you linked them
+    to, counting results into `record`. Only the grade you own is updated,
+    and each page is requested once even if it prices several of your rows.
+
+    The new value is saved under the same source name and URL as the price
+    it updates, so it replaces it rather than being blended with it."""
+    items = [
+        item
+        for item in db.get_collection_items()
+        if item["ownership_grade"] in pricecharting.GRADE_LABELS
+    ]
+    owned: dict[str, set[str]] = {}
+    for item in items:
+        owned.setdefault(item["card_id"], set()).add(item["ownership_grade"])
+
+    cards = db.get_cards(list(owned))
+    snapshots = db.get_price_snapshots_for_cards(list(owned))
+
+    # page URL -> the (card, grade, newest row of that source) it prices
+    targets: dict[str, list[tuple[dict[str, Any], str, dict[str, Any]]]] = {}
+    for card_id, grades in owned.items():
+        newest_first = list(reversed(snapshots.get(card_id, [])))
+
+        for (grade, _), row in latest_by_source(newest_first).items():
+            url = pricecharting.page_url(row.get("source_url"))
+            if grade in grades and url and is_manual_entry(row):
+                card = cards.get(card_id) or {"id": card_id}
+                targets.setdefault(url, []).append((card, grade, row))
+
+    _progress.update(phase="pricecharting", done=0, total=len(targets))
+
+    for index, (url, entries) in enumerate(targets.items()):
+        record["attempted"] += len(entries)
+        record["requests"] += 1
+
+        try:
+            prices = await pricecharting.get_prices(url)
+        except pricecharting.PriceChartingBlocked as exc:
+            record["failed"] += len(entries)
+            record["stopped_early"] = str(exc)
+            break
+        except Exception as exc:
+            logger.exception("PriceCharting lookup failed for %s", url)
+            record["failed"] += len(entries)
+            for card, _, _ in entries:
+                _note(record, card, f"PriceCharting: {exc}")
+            _progress["done"] = index + 1
+            continue
+
+        for card, grade, row in entries:
+            label = pricecharting.GRADE_LABELS[grade]
+            price = prices.get(grade)
+
+            if price is None:
+                record["no_price"] += 1
+                _note(record, card, f"PriceCharting has no {label} price.")
+                continue
+
+            db.insert_price_snapshot(
+                card_id=card["id"],
+                grade=grade,
+                source=row["source"],
+                value=price,
+                source_url=row.get("source_url"),
+                metadata={
+                    "entry_method": "pricecharting",
+                    "provider": "PriceCharting",
+                    "price_label": label,
+                    "page_url": url,
+                },
+            )
+            record["updated"] += 1
+
+        _progress["done"] = index + 1
 
 
 def _scheduled_runs_before_reset() -> int:
@@ -498,7 +587,8 @@ def _manual_cooldown_remaining() -> int:
 
 
 def start_manual_sync() -> None:
-    """Starts a full sync in the background (raw + graded). Raises SyncBusy
+    """Starts a full sync in the background (raw, PriceCharting, graded).
+    Raises SyncBusy
     if one is already running and SyncCooldown if the last manual sync was
     too recent."""
     if _progress["running"] or _sync_lock.locked():
@@ -526,19 +616,26 @@ async def _manual_sync() -> None:
                 "error": None,
                 "raw": _new_raw_record(),
                 "graded": _new_graded_record(),
+                "pricecharting": _new_pricecharting_record(),
             }
 
             state = _read_state() or {}
             state["manual"] = record
             _write_state(state)
 
-            # Raw and graded are independent: a graded failure or quota stop
-            # never undoes or blocks the raw prices already saved.
+            # Raw, PriceCharting and graded are independent: a failure or
+            # quota stop in one never undoes or blocks the others.
             siblings_by_card: dict[str, dict[str, Any]] = {}
             try:
                 siblings_by_card = await _pull_raw(record["raw"])
             except Exception as exc:
                 logger.exception("Manual raw price sync failed")
+                record["error"] = f"{type(exc).__name__}: {exc}"
+
+            try:
+                await _pull_pricecharting(record["pricecharting"])
+            except Exception as exc:
+                logger.exception("PriceCharting refresh failed")
                 record["error"] = f"{type(exc).__name__}: {exc}"
 
             try:
@@ -583,7 +680,11 @@ def get_status() -> dict[str, Any]:
         last_pull_at = manual_at
         last_result = {
             **manual["raw"],
-            "failed": manual["raw"]["failed"] + manual["graded"]["failed"],
+            "failed": (
+                manual["raw"]["failed"]
+                + manual["graded"]["failed"]
+                + (manual.get("pricecharting") or {}).get("failed", 0)
+            ),
         }
     elif scheduled_at:
         last_pull_at = scheduled_at

@@ -37,6 +37,7 @@ from typing import Any
 from .valuation import (
     estimate_from_sources,
     grade_label,
+    is_auto_refreshed,
     is_manual_entry,
     is_variant_ambiguous,
 )
@@ -119,8 +120,12 @@ class PriceSeries:
             key=lambda row: (parse_ts(row["observed_at"]), row.get("id") or 0),
         )
 
+        # Only prices you typed in; a sync re-reading your PriceCharting page
+        # is a market move, not a correction.
         self.manual_times = [
-            parse_ts(row["observed_at"]) for row in rows if is_manual_entry(row)
+            parse_ts(row["observed_at"])
+            for row in rows
+            if is_manual_entry(row) and not is_auto_refreshed(row)
         ]
         self.observed_days = {parse_ts(row["observed_at"]).date() for row in rows}
         self.times: list[datetime] = []

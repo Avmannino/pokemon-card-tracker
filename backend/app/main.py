@@ -443,7 +443,6 @@ async def set_collection_variant(
             observed_at=snapshot["observed_at"],
             metadata={
                 **(snapshot.get("metadata") or {}),
-                "entry_method": "manual",
                 "carried_from_card_id": card["id"],
                 "carried_from_snapshot_id": snapshot.get("id"),
             },

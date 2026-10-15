@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from app.services import poketrace, price_sync, state_store, tcggo
+from app.services import poketrace, price_sync, pricecharting, state_store, tcggo
 from app.services.portfolio import value_change
 from app.services.valuation import build_market_values, evaluate
 
@@ -491,6 +491,7 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(price_sync.db, "insert_price_snapshot", lambda **kw: inserted.append(kw)),
             mock.patch.object(price_sync.db, "save_card", lambda card: card),
             mock.patch.object(price_sync.db, "update_card_variant_siblings", lambda *a: True),
+            mock.patch.object(price_sync.db, "get_price_snapshots_for_cards", lambda ids: {}),
             mock.patch.object(poketrace, "get_cards_by_tcgplayer_ids", fake_batch),
             mock.patch.object(price_sync, "pull_card_graded_prices", graded_exhausted),
             mock.patch.object(tcggo, "is_configured", lambda: True),
@@ -536,6 +537,84 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pulled, [])
         self.assertEqual(record["skipped_variant_ambiguous"], 1)
+
+
+PRICE_GUIDE = """
+<div id="full-prices"><table>
+  <tr><td>Grade 8</td><td class="price js-price">$14.00</td></tr>
+  <tr><td>Grade 9</td><td class="price js-price">$19.50</td></tr>
+  <tr><td>Grade 9.5</td><td class="price js-price">$29.00</td></tr>
+  <tr><td>PSA 10</td><td class="price js-price">$1,189.63</td></tr>
+</table></div>
+"""
+
+
+class PriceChartingPages(unittest.TestCase):
+    def test_reads_each_grade_from_the_price_guide(self):
+        self.assertEqual(
+            pricecharting.parse_prices(PRICE_GUIDE),
+            {"PSA_8": 14.0, "PSA_9": 19.5, "PSA_10": 1189.63},
+        )
+
+    def test_no_sales_is_no_price(self):
+        html = PRICE_GUIDE.replace("$14.00", "-")
+        self.assertIsNone(pricecharting.parse_prices(html)["PSA_8"])
+
+    def test_saved_url_is_reduced_to_the_card_page(self):
+        self.assertEqual(
+            pricecharting.page_url("https://www.pricecharting.com/game/pokemon-promo/rowlet-43?q=rowlet#x"),
+            "https://www.pricecharting.com/game/pokemon-promo/rowlet-43",
+        )
+        self.assertIsNone(pricecharting.page_url("https://www.psacard.com/cardfacts/x"))
+
+
+class PriceChartingRefresh(unittest.IsolatedAsyncioTestCase):
+    async def test_only_the_owned_grade_is_updated_and_replaces_the_manual_price(self):
+        url = "https://www.pricecharting.com/game/pokemon-vivid-voltage/lugia-132?q=lugia"
+        manual = {
+            **snap(17.0, "manual", hours=-48, grade="PSA_9"),
+            "card_id": "c1", "source_url": url,
+        }
+        other_grade = {
+            **snap(150.0, "manual", hours=-48, grade="PSA_10"),
+            "card_id": "c1", "source_url": url,
+        }
+        items = [
+            {"id": "i1", "card_id": "c1", "ownership_grade": "PSA_9", "quantity": 1},
+            {"id": "i2", "card_id": "c1", "ownership_grade": "PSA_9", "quantity": 1},
+        ]
+        inserted, fetched = [], []
+
+        async def fake_prices(page):
+            fetched.append(page)
+            return {"PSA_8": 14.0, "PSA_9": 19.5, "PSA_10": 189.63}
+
+        patches = [
+            mock.patch.object(price_sync.db, "get_collection_items", lambda: items),
+            mock.patch.object(price_sync.db, "get_cards", lambda ids: {"c1": {"id": "c1"}}),
+            mock.patch.object(
+                price_sync.db, "get_price_snapshots_for_cards",
+                lambda ids: {"c1": [manual, other_grade]},
+            ),
+            mock.patch.object(price_sync.db, "insert_price_snapshot", lambda **kw: inserted.append(kw)),
+            mock.patch.object(pricecharting, "get_prices", fake_prices),
+        ]
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        record = price_sync._new_pricecharting_record()
+        await price_sync._pull_pricecharting(record)
+
+        self.assertEqual(fetched, ["https://www.pricecharting.com/game/pokemon-vivid-voltage/lugia-132"])
+        self.assertEqual([row["grade"] for row in inserted], ["PSA_9"])
+        self.assertEqual(inserted[0]["value"], 19.5)
+        self.assertEqual(inserted[0]["source"], manual["source"])
+
+        refreshed = {**snap(19.5, "manual", grade="PSA_9"), **inserted[0]}
+        values = build_market_values([refreshed, manual])
+        self.assertEqual(values["PSA_9"]["estimate"], 19.5)
+        self.assertEqual(values["PSA_9"]["auto_source"], "PriceCharting")
 
 
 if __name__ == "__main__":
