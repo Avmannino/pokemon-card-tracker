@@ -587,8 +587,7 @@ def _manual_cooldown_remaining() -> int:
 
 
 def start_manual_sync() -> None:
-    """Starts a full sync in the background (raw, PriceCharting, graded).
-    Raises SyncBusy
+    """Starts a full sync in the background (raw + graded). Raises SyncBusy
     if one is already running and SyncCooldown if the last manual sync was
     too recent."""
     if _progress["running"] or _sync_lock.locked():
@@ -616,26 +615,19 @@ async def _manual_sync() -> None:
                 "error": None,
                 "raw": _new_raw_record(),
                 "graded": _new_graded_record(),
-                "pricecharting": _new_pricecharting_record(),
             }
 
             state = _read_state() or {}
             state["manual"] = record
             _write_state(state)
 
-            # Raw, PriceCharting and graded are independent: a failure or
-            # quota stop in one never undoes or blocks the others.
+            # Raw and graded are independent: a graded failure or quota stop
+            # never undoes or blocks the raw prices already saved.
             siblings_by_card: dict[str, dict[str, Any]] = {}
             try:
                 siblings_by_card = await _pull_raw(record["raw"])
             except Exception as exc:
                 logger.exception("Manual raw price sync failed")
-                record["error"] = f"{type(exc).__name__}: {exc}"
-
-            try:
-                await _pull_pricecharting(record["pricecharting"])
-            except Exception as exc:
-                logger.exception("PriceCharting refresh failed")
                 record["error"] = f"{type(exc).__name__}: {exc}"
 
             try:
@@ -655,6 +647,59 @@ async def _manual_sync() -> None:
                 record["raw"]["succeeded"],
                 record["raw"]["attempted"],
                 record["graded"]["with_data"],
+            )
+    finally:
+        _progress.update(running=False, phase=None)
+
+
+def start_graded_refresh() -> None:
+    """Re-reads your PSA prices from their PriceCharting pages in the
+    background. Only the Refresh Graded Cards button starts this; no
+    scheduled or Refresh Prices sync does. Raises SyncBusy if any sync is
+    already running."""
+    if _progress["running"] or _sync_lock.locked():
+        raise SyncBusy("A price sync is already running.")
+
+    # Claimed now, before the task gets to run, so a second click can't slip
+    # in between.
+    _progress.update(
+        running=True, kind="graded_refresh", phase="pricecharting", done=0, total=0
+    )
+
+    task = asyncio.create_task(_graded_refresh())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _graded_refresh() -> None:
+    try:
+        async with _syncing("graded_refresh"):
+            record: dict[str, Any] = {
+                "started_at": _now().isoformat(),
+                "finished_at": None,
+                "error": None,
+                **_new_pricecharting_record(),
+            }
+
+            state = _read_state() or {}
+            state["pricecharting"] = record
+            _write_state(state)
+
+            try:
+                await _pull_pricecharting(record)
+            except Exception as exc:
+                logger.exception("Graded card refresh failed")
+                record["error"] = f"{type(exc).__name__}: {exc}"
+
+            record["finished_at"] = _now().isoformat()
+            state = _read_state() or {}
+            state["pricecharting"] = record
+            _write_state(state)
+
+            logger.info(
+                "Graded card refresh finished: %s of %s updated",
+                record["updated"],
+                record["attempted"],
             )
     finally:
         _progress.update(running=False, phase=None)
@@ -680,11 +725,7 @@ def get_status() -> dict[str, Any]:
         last_pull_at = manual_at
         last_result = {
             **manual["raw"],
-            "failed": (
-                manual["raw"]["failed"]
-                + manual["graded"]["failed"]
-                + (manual.get("pricecharting") or {}).get("failed", 0)
-            ),
+            "failed": manual["raw"]["failed"] + manual["graded"]["failed"],
         }
     elif scheduled_at:
         last_pull_at = scheduled_at
@@ -700,6 +741,7 @@ def get_status() -> dict[str, Any]:
         "last_result": last_result,
         "graded": state.get("graded"),
         "manual": manual,
+        "pricecharting": state.get("pricecharting"),
         "syncing": _progress["running"],
         "progress": dict(_progress) if _progress["running"] else None,
         "manual_available_in": _manual_cooldown_remaining(),

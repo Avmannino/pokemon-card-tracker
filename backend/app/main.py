@@ -509,6 +509,19 @@ async def refresh_now() -> dict[str, bool]:
     return {"started": True}
 
 
+@app.post("/api/refresh-graded", status_code=202)
+async def refresh_graded() -> dict[str, bool]:
+    """"Refresh Graded Cards": re-reads your PSA prices from their
+    PriceCharting pages in the background. Never runs on a schedule;
+    progress is reported by /api/refresh-status."""
+    try:
+        price_sync.start_graded_refresh()
+    except price_sync.SyncBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"started": True}
+
+
 @app.post("/api/cards/{card_id}/graded-values")
 def save_graded_values(
     card_id: str,

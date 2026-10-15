@@ -8,6 +8,7 @@ import {
   saveGradedValues,
   searchCards,
   setCollectionVariant,
+  startGradedRefresh,
   startSync,
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
@@ -40,12 +41,13 @@ function refreshStatusText(status) {
   }
 
   if (status.syncing && status.progress) {
-    const { phase, done, total } = status.progress;
+    const { kind, phase, done, total } = status.progress;
 
-    const label =
-      { graded: "graded", pricecharting: "PriceCharting" }[phase] || "raw";
+    if (kind === "graded_refresh") {
+      return `Refreshing graded cards… ${done}/${total}`;
+    }
 
-    return `Syncing ${label} prices… ${done}/${total}`;
+    return `Syncing ${phase === "graded" ? "graded" : "raw"} prices… ${done}/${total}`;
   }
 
   const last = status.last_pull_at
@@ -53,6 +55,37 @@ function refreshStatusText(status) {
     : "Not synced yet";
 
   return `${last} · Next auto sync ${pullTime(status.next_pull_at)}`;
+}
+
+function gradedRefreshText(status) {
+  const finished = status?.pricecharting?.finished_at;
+
+  return finished
+    ? `Graded cards last refreshed ${pullTime(finished)}`
+    : "Graded cards only refresh when you press the button";
+}
+
+function gradedRefreshSummary(status) {
+  const run = status?.pricecharting;
+
+  if (!run) {
+    return "Graded refresh finished.";
+  }
+
+  if (run.error) {
+    return `Graded refresh stopped early: ${run.error}`;
+  }
+
+  if (run.attempted === 0) {
+    return "No graded cards have a PriceCharting link to refresh from.";
+  }
+
+  return (
+    `Graded cards: ${run.updated} of ${run.attempted} updated from PriceCharting.` +
+    (run.no_price ? ` ${run.no_price} had no price there.` : "") +
+    (run.failed ? ` ${run.failed} failed.` : "") +
+    (run.stopped_early ? ` ${run.stopped_early}` : "")
+  );
 }
 
 function syncSummary(status) {
@@ -67,24 +100,17 @@ function syncSummary(status) {
   }
 
   const { raw, graded } = manual;
-  const pricecharting = manual.pricecharting || { attempted: 0, failed: 0 };
   const parts = [`raw prices updated for ${raw.succeeded} of ${raw.attempted} cards`];
-
-  if (pricecharting.attempted > 0) {
-    parts.push(
-      `PSA prices updated from PriceCharting for ${pricecharting.updated} of ${pricecharting.attempted}`
-    );
-  }
 
   if (graded.attempted > 0) {
     parts.push(`graded prices found for ${graded.with_data} of ${graded.attempted}`);
   }
 
-  const problems = [raw, pricecharting, graded]
+  const problems = [raw, graded]
     .map((part) => part.stopped_early)
     .filter(Boolean);
 
-  const failed = raw.failed + graded.failed + pricecharting.failed;
+  const failed = raw.failed + graded.failed;
 
   return (
     `Synced: ${parts.join("; ")}.` +
@@ -266,8 +292,13 @@ function App() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [gradedRefreshing, setGradedRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState(null);
   const watchingSync = useRef(false);
+  // Also true when the page loads while a graded refresh is running.
+  const gradedRunning =
+    gradedRefreshing ||
+    (syncing && refreshStatus?.progress?.kind === "graded_refresh");
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
@@ -565,6 +596,32 @@ function App() {
     }
   }
 
+  // Your PSA prices re-read from their PriceCharting pages. Nothing else
+  // ever triggers this.
+  async function handleGradedRefresh() {
+    setError("");
+    setMessage("");
+    setGradedRefreshing(true);
+
+    try {
+      try {
+        await startGradedRefresh();
+      } catch (err) {
+        // "Already running" from the server.
+        setError(err.message);
+        loadRefreshStatus();
+        return;
+      }
+
+      const status = await watchSync();
+      setMessage(gradedRefreshSummary(status));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGradedRefreshing(false);
+    }
+  }
+
   // Manual sync: pulls fresh prices now, on top of the twice-daily schedule.
   async function handleSyncNow() {
     setError("");
@@ -683,16 +740,28 @@ function App() {
           </div>
 
           <div className="refresh-control">
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={handleSyncNow}
-              disabled={syncing}
-            >
-              {syncing ? "Syncing…" : "Refresh Prices"}
-            </button>
+            <div className="refresh-buttons">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleSyncNow}
+                disabled={syncing}
+              >
+                {syncing && !gradedRunning ? "Syncing…" : "Refresh Prices"}
+              </button>
+
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleGradedRefresh}
+                disabled={syncing}
+              >
+                {gradedRunning ? "Refreshing…" : "Refresh Graded Cards"}
+              </button>
+            </div>
 
             <small>{refreshStatusText(refreshStatus)}</small>
+            <small>{gradedRefreshText(refreshStatus)}</small>
           </div>
         </div>
 
@@ -1108,7 +1177,7 @@ function App() {
                               rel="noreferrer"
                               title={
                                 item.market_values[item.ownership_grade].auto_source
-                                  ? "Updated automatically each sync from this page"
+                                  ? "Updated from this page by Refresh Graded Cards"
                                   : "Open the source you entered this price from"
                               }
                             >
@@ -1362,8 +1431,8 @@ function App() {
 
                 <span>
                   Enter values from a source you checked
-                  manually. With a PriceCharting URL, the
-                  grade you own updates itself each sync.
+                  manually. With a PriceCharting URL, Refresh
+                  Graded Cards updates the grade you own.
                 </span>
               </div>
 

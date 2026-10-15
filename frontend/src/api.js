@@ -78,6 +78,14 @@ export function startSync() {
   });
 }
 
+// Re-reads your PSA prices from their PriceCharting pages in the background;
+// only ever started by the Refresh Graded Cards button.
+export function startGradedRefresh() {
+  return request("/api/refresh-graded", {
+    method: "POST",
+  });
+}
+
 export function saveGradedValues(cardId, payload) {
   return request(`/api/cards/${cardId}/graded-values`, {
     method: "POST",

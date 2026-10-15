@@ -801,6 +801,16 @@ h2 {
   gap: 6px;
 }
 
+.refresh-buttons {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  justify-content: flex-end;
+
+  gap: 8px;
+}
+
 .refresh-control small {
   color: #737f93;
 
@@ -2225,6 +2235,10 @@ a.manual-source-link:hover {
 
   .refresh-control {
     align-items: flex-start;
+  }
+
+  .refresh-buttons {
+    justify-content: flex-start;
   }
 
   .collection-gallery {

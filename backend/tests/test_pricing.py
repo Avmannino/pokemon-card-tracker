@@ -491,7 +491,6 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(price_sync.db, "insert_price_snapshot", lambda **kw: inserted.append(kw)),
             mock.patch.object(price_sync.db, "save_card", lambda card: card),
             mock.patch.object(price_sync.db, "update_card_variant_siblings", lambda *a: True),
-            mock.patch.object(price_sync.db, "get_price_snapshots_for_cards", lambda ids: {}),
             mock.patch.object(poketrace, "get_cards_by_tcgplayer_ids", fake_batch),
             mock.patch.object(price_sync, "pull_card_graded_prices", graded_exhausted),
             mock.patch.object(tcggo, "is_configured", lambda: True),
