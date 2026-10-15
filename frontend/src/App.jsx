@@ -23,7 +23,6 @@ import {
 
 // Grades you can own and track. PSA 7 isn't tracked.
 const GRADES = ["RAW", "PSA_8", "PSA_9", "PSA_10"];
-const TABLE_GRADES = GRADES;
 const SEARCH_PAGE_SIZE = 10;
 
 function pullTime(iso) {
@@ -166,12 +165,8 @@ function chunk(items, size) {
 // key === null means the column can't be sorted.
 const COLLECTION_COLUMNS = [
   { key: "card", label: "Card", numeric: false },
-  ...TABLE_GRADES.map((grade) => ({
-    key: grade,
-    label: gradeLabel(grade),
-    numeric: true,
-  })),
   { key: "owned", label: "You Own", numeric: true },
+  { key: "each", label: "Market Value", numeric: true },
   { key: "qty", label: "Qty", numeric: true },
   { key: "value", label: "Your Value", numeric: true },
   { key: null, label: "Actions", numeric: false },
@@ -183,6 +178,8 @@ function sortValue(item, key) {
       return cardTitle(item.card).toLowerCase();
     case "owned":
       return GRADES.indexOf(item.ownership_grade);
+    case "each":
+      return item.owned_market_value_each;
     case "qty":
       return item.quantity;
     case "value":
@@ -1073,50 +1070,6 @@ function App() {
                       </div>
                     </td>
 
-                    {TABLE_GRADES.map((grade) => (
-                      <td key={grade}>
-                        <div className="price-cell">
-                          <strong>
-                            {money(
-                              item.market_values?.[grade]
-                                ?.estimate
-                            )}
-                          </strong>
-
-                          {item.market_values?.[grade]?.is_manual ? (
-                            item.market_values[grade].source_url ? (
-                              <a
-                                className="manual-source-link"
-                                href={item.market_values[grade].source_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                title="Open the source you entered this price from"
-                              >
-                                Manual
-                              </a>
-                            ) : (
-                              <span
-                                className="manual-source-link"
-                                title="No source URL saved — add one via PSA values to link this"
-                              >
-                                Manual
-                              </span>
-                            )
-                          ) : (
-                            <span>
-                              {item.market_values?.[grade]
-                                ?.source_count || 0}{" "}
-                              source
-                              {(item.market_values?.[grade]
-                                ?.source_count || 0) === 1
-                                ? ""
-                                : "s"}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    ))}
-
                     <td>
                       <div className="owned-cell">
                         <strong>
@@ -1124,6 +1077,48 @@ function App() {
                             item.ownership_grade
                           )}
                         </strong>
+                      </div>
+                    </td>
+
+                    <td>
+                      <div className="price-cell">
+                        <strong>
+                          {money(
+                            item.market_values?.[item.ownership_grade]
+                              ?.estimate
+                          )}
+                        </strong>
+
+                        {item.market_values?.[item.ownership_grade]?.is_manual ? (
+                          item.market_values[item.ownership_grade].source_url ? (
+                            <a
+                              className="manual-source-link"
+                              href={item.market_values[item.ownership_grade].source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open the source you entered this price from"
+                            >
+                              Manual
+                            </a>
+                          ) : (
+                            <span
+                              className="manual-source-link"
+                              title="No source URL saved — add one via PSA values to link this"
+                            >
+                              Manual
+                            </span>
+                          )
+                        ) : (
+                          <span>
+                            {item.market_values?.[item.ownership_grade]
+                              ?.source_count || 0}{" "}
+                            source
+                            {(item.market_values?.[item.ownership_grade]
+                              ?.source_count || 0) === 1
+                              ? ""
+                              : "s"}
+                          </span>
+                        )}
                       </div>
                     </td>
 
