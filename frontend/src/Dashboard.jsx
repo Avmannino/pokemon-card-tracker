@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getPortfolioDashboard } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
@@ -62,171 +62,336 @@ function ChangeBadge({ change, changePct }) {
   );
 }
 
-function LineChart({ points, hoveredIndex, onHover, formatLabel }) {
-  const width = 640;
-  const height = 200;
-  const padX = 6;
-  const padY = 14;
+// Size of an element in CSS pixels, kept current as it resizes, so the
+// chart draws at its real size instead of stretching a fixed drawing.
+function useElementSize(ref) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
-  // The performance line, anchored to the current value: only market
-  // movement moves it, never cards added or removed.
-  const values = points.map((point) => point.value);
-  const times = points.map((point) => new Date(point.timestamp).getTime());
-  const firstTime = times[0];
-  const timeSpan = times[times.length - 1] - firstTime || 1;
-  const plotWidth = width - padX * 2;
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const span = maxValue - minValue || Math.max(Math.abs(maxValue), 1) * 0.02 || 1;
-
-  const coords = points.map((point, index) => ({
-    x: padX + ((times[index] - firstTime) / timeSpan) * plotWidth,
-    y:
-      height -
-      padY -
-      ((point.value - minValue) / span) * (height - padY * 2),
-  }));
-
-  const isPositive =
-    points[points.length - 1].value >= points[0].value;
-  const stroke = isPositive ? "#5fe3a4" : "#f18a8a";
-  const fillId = isPositive ? "chart-fill-up" : "chart-fill-down";
-
-  const linePath = coords
-    .map((c, index) => `${index === 0 ? "M" : "L"} ${c.x.toFixed(2)} ${c.y.toFixed(2)}`)
-    .join(" ");
-
-  const areaPath =
-    coords.length > 1
-      ? `${linePath} L ${coords[coords.length - 1].x.toFixed(2)} ${(height - padY).toFixed(2)} ` +
-        `L ${coords[0].x.toFixed(2)} ${(height - padY).toFixed(2)} Z`
-      : "";
-
-  function handleMove(event) {
-    if (coords.length < 2) {
-      return;
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return undefined;
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relativeX = ((event.clientX - rect.left) / rect.width) * width;
-    const clamped = Math.max(padX, Math.min(width - padX, relativeX));
-    const target = firstTime + ((clamped - padX) / plotWidth) * timeSpan;
+    function update() {
+      const rect = element.getBoundingClientRect();
+      setSize((current) =>
+        current.width === Math.round(rect.width) &&
+        current.height === Math.round(rect.height)
+          ? current
+          : { width: Math.round(rect.width), height: Math.round(rect.height) }
+      );
+    }
 
-    let nearest = 0;
-    times.forEach((time, index) => {
-      if (Math.abs(time - target) < Math.abs(times[nearest] - target)) {
-        nearest = index;
-      }
-    });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
 
-    onHover(nearest);
+  return size;
+}
+
+// Round tick spacing (1, 2, 2.5, 5 x 10^n) for about `count` gridlines.
+function valueTicks(min, max, count) {
+  if (max - min < 1e-9) {
+    const pad = Math.max(Math.abs(max) * 0.02, 1);
+    min -= pad;
+    max += pad;
   }
 
-  const hovered =
-    hoveredIndex !== null && coords[hoveredIndex] ? coords[hoveredIndex] : null;
+  const rough = (max - min) / count;
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const fraction = rough / power;
+  const step =
+    (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 2.5 ? 2.5 : fraction <= 5 ? 5 : 10) *
+    power;
+
+  const low = Math.floor(min / step) * step;
+  const high = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let value = low; value <= high + step / 2; value += step) {
+    ticks.push(Number(value.toFixed(6)));
+  }
+
+  return { low, high, step, ticks };
+}
+
+// Smooth line through the points that never overshoots them (monotone
+// cubic), so a flat stretch stays flat and peaks aren't exaggerated.
+function smoothPath(coords) {
+  const count = coords.length;
+  if (count === 0) {
+    return "";
+  }
+  if (count < 3) {
+    return coords
+      .map((c, index) => `${index ? "L" : "M"}${c.x.toFixed(2)},${c.y.toFixed(2)}`)
+      .join("");
+  }
+
+  const slopes = [];
+  for (let i = 0; i < count - 1; i += 1) {
+    const dx = coords[i + 1].x - coords[i].x;
+    slopes.push(dx ? (coords[i + 1].y - coords[i].y) / dx : 0);
+  }
+
+  const tangents = [slopes[0]];
+  for (let i = 1; i < count - 1; i += 1) {
+    tangents.push(slopes[i - 1] * slopes[i] <= 0 ? 0 : (slopes[i - 1] + slopes[i]) / 2);
+  }
+  tangents.push(slopes[count - 2]);
+
+  for (let i = 0; i < count - 1; i += 1) {
+    if (!slopes[i]) {
+      tangents[i] = 0;
+      tangents[i + 1] = 0;
+      continue;
+    }
+    const a = tangents[i] / slopes[i];
+    const b = tangents[i + 1] / slopes[i];
+    const length = a * a + b * b;
+    if (length > 9) {
+      const scale = 3 / Math.sqrt(length);
+      tangents[i] = scale * a * slopes[i];
+      tangents[i + 1] = scale * b * slopes[i];
+    }
+  }
+
+  let path = `M${coords[0].x.toFixed(2)},${coords[0].y.toFixed(2)}`;
+  for (let i = 0; i < count - 1; i += 1) {
+    const p0 = coords[i];
+    const p1 = coords[i + 1];
+    const third = (p1.x - p0.x) / 3;
+    path +=
+      `C${(p0.x + third).toFixed(2)},${(p0.y + tangents[i] * third).toFixed(2)} ` +
+      `${(p1.x - third).toFixed(2)},${(p1.y - tangents[i + 1] * third).toFixed(2)} ` +
+      `${p1.x.toFixed(2)},${p1.y.toFixed(2)}`;
+  }
+  return path;
+}
+
+function nearestIndex(times, target) {
+  let low = 0;
+  let high = times.length - 1;
+  while (high - low > 1) {
+    const mid = (low + high) >> 1;
+    if (times[mid] <= target) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return Math.abs(times[high] - target) < Math.abs(times[low] - target) ? high : low;
+}
+
+function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
+  const wrapRef = useRef(null);
+  const { width, height } = useElementSize(wrapRef);
+  const ready = width > 0 && height > 0 && points.length > 0;
+
+  const values = points.map((point) => point.value);
+  const times = points.map((point) => new Date(point.timestamp).getTime());
+  const isPositive = values[values.length - 1] >= values[0];
+  const color = isPositive ? "#5fe3a4" : "#f18a8a";
+
+  // Layout in real pixels. Fewer gridlines and dates on a narrow screen.
+  const compact = width < 480;
+  const yTicks = valueTicks(Math.min(...values), Math.max(...values), compact ? 3 : 4);
+  const decimals = yTicks.step < 1 ? 2 : 0;
+  const tickLabel = (value) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(value);
+  const labels = yTicks.ticks.map(tickLabel);
+
+  const pad = {
+    top: 12,
+    bottom: 24,
+    left: 4,
+    right: Math.max(...labels.map((label) => label.length)) * 6.6 + 12,
+  };
+  const plotWidth = Math.max(width - pad.left - pad.right, 1);
+  const plotHeight = Math.max(height - pad.top - pad.bottom, 1);
+  const firstTime = times[0];
+  const timeSpan = times[times.length - 1] - firstTime || 1;
+
+  const x = (time) => pad.left + ((time - firstTime) / timeSpan) * plotWidth;
+  const y = (value) =>
+    pad.top + (1 - (value - yTicks.low) / (yTicks.high - yTicks.low)) * plotHeight;
+
+  const coords = points.map((point, index) => ({
+    x: points.length > 1 ? x(times[index]) : pad.left + plotWidth / 2,
+    y: y(point.value),
+  }));
+  const linePath = smoothPath(coords);
+  const bottom = pad.top + plotHeight;
+  const areaPath =
+    coords.length > 1
+      ? `${linePath}L${coords[coords.length - 1].x.toFixed(2)},${bottom}L${coords[0].x.toFixed(2)},${bottom}Z`
+      : "";
+
+  const xTickCount = Math.max(2, Math.min(compact ? 3 : 5, Math.floor(plotWidth / 110)));
+  const xTicks =
+    points.length > 1
+      ? Array.from({ length: xTickCount }, (_, i) => firstTime + (timeSpan * i) / (xTickCount - 1))
+      : [];
+
+  function pointerToIndex(event) {
+    if (points.length < 2) {
+      return 0;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = Math.min(Math.max(event.clientX - rect.left, pad.left), pad.left + plotWidth);
+    return nearestIndex(times, firstTime + ((px - pad.left) / plotWidth) * timeSpan);
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const current = hoveredIndex ?? points.length - 1;
+      const next = current + (event.key === "ArrowRight" ? 1 : -1);
+      onHover(Math.max(0, Math.min(points.length - 1, next)));
+    } else if (event.key === "Escape") {
+      onHover(null);
+    }
+  }
+
+  const hovered = hoveredIndex !== null && coords[hoveredIndex] ? coords[hoveredIndex] : null;
+  const gradientId = isPositive ? "chart-fill-up" : "chart-fill-down";
 
   return (
-    <div className="chart-svg-wrap">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio="none"
-        onMouseMove={handleMove}
-        onMouseLeave={() => onHover(null)}
-      >
-        <defs>
-          <linearGradient id="chart-fill-up" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(95,227,164,0.32)" />
-            <stop offset="100%" stopColor="rgba(95,227,164,0)" />
-          </linearGradient>
+    <div className="chart-svg-wrap" ref={wrapRef}>
+      {ready && (
+        <svg
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="Portfolio value over the selected range. Use the arrow keys to step through it."
+          tabIndex={0}
+          onPointerDown={(event) => onHover(pointerToIndex(event))}
+          onPointerMove={(event) => {
+            // Mouse: follow the cursor. Touch/pen: scrub while pressed.
+            if (event.pointerType === "mouse" || event.buttons) {
+              onHover(pointerToIndex(event));
+            }
+          }}
+          onPointerLeave={() => onHover(null)}
+          onPointerUp={(event) => event.pointerType !== "mouse" && onHover(null)}
+          onPointerCancel={() => onHover(null)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => onHover(null)}
+        >
+          <defs>
+            <linearGradient id="chart-fill-up" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(95,227,164,0.28)" />
+              <stop offset="100%" stopColor="rgba(95,227,164,0)" />
+            </linearGradient>
+            <linearGradient id="chart-fill-down" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(241,138,138,0.26)" />
+              <stop offset="100%" stopColor="rgba(241,138,138,0)" />
+            </linearGradient>
+          </defs>
 
-          <linearGradient id="chart-fill-down" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(241,138,138,0.30)" />
-            <stop offset="100%" stopColor="rgba(241,138,138,0)" />
-          </linearGradient>
-        </defs>
+          {yTicks.ticks.map((tick, index) => (
+            <g key={tick}>
+              <line
+                className="chart-grid"
+                x1={pad.left}
+                x2={pad.left + plotWidth}
+                y1={y(tick)}
+                y2={y(tick)}
+              />
+              <text
+                className="chart-axis-label"
+                x={width - 4}
+                y={y(tick)}
+                textAnchor="end"
+                dominantBaseline="middle"
+              >
+                {labels[index]}
+              </text>
+            </g>
+          ))}
 
-        {areaPath && <path d={areaPath} fill={`url(#${fillId})`} stroke="none" />}
+          {xTicks.map((time, index) => (
+            <text
+              key={time}
+              className="chart-axis-label"
+              x={x(time)}
+              y={height - 6}
+              textAnchor={index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}
+            >
+              {formatAxis(time)}
+            </text>
+          ))}
 
-        {/* The chart stretches to fill its card, so strokes are non-scaling
-            and dots are zero-length round-capped lines (a <circle> would
-            squash into an ellipse). */}
-        {coords.length > 1 ? (
-          <path
-            d={linePath}
-            fill="none"
-            stroke={stroke}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        ) : (
-          <line
-            x1={coords[0].x}
-            x2={coords[0].x}
-            y1={coords[0].y}
-            y2={coords[0].y}
-            stroke={stroke}
-            strokeWidth="8"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
-
-        {hovered && (
-          <>
+          {/* Where the range started, for reference. */}
+          {points.length > 1 && (
             <line
-              x1={hovered.x}
-              x2={hovered.x}
-              y1={padY}
-              y2={height - padY}
-              stroke="rgba(255,255,255,0.18)"
-              vectorEffect="non-scaling-stroke"
+              className="chart-baseline"
+              x1={pad.left}
+              x2={pad.left + plotWidth}
+              y1={coords[0].y}
+              y2={coords[0].y}
             />
+          )}
 
-            <line
-              x1={hovered.x}
-              x2={hovered.x}
-              y1={hovered.y}
-              y2={hovered.y}
-              stroke={stroke}
-              strokeWidth="11"
+          {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
+
+          {coords.length > 1 ? (
+            <path
+              d={linePath}
+              fill="none"
+              stroke={color}
+              strokeWidth="2.25"
+              strokeLinejoin="round"
               strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
             />
+          ) : (
+            <circle cx={coords[0].x} cy={coords[0].y} r="4" fill={color} />
+          )}
 
-            <line
-              x1={hovered.x}
-              x2={hovered.x}
-              y1={hovered.y}
-              y2={hovered.y}
-              stroke="#0b0f17"
-              strokeWidth="6"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          </>
-        )}
-      </svg>
+          {hovered && (
+            <g pointerEvents="none">
+              <line
+                className="chart-crosshair"
+                x1={hovered.x}
+                x2={hovered.x}
+                y1={pad.top}
+                y2={bottom}
+              />
+              <circle cx={hovered.x} cy={hovered.y} r="9" fill={color} opacity="0.18" />
+              <circle
+                cx={hovered.x}
+                cy={hovered.y}
+                r="4.5"
+                fill="#0b0f17"
+                stroke={color}
+                strokeWidth="2.5"
+              />
+            </g>
+          )}
+        </svg>
+      )}
 
-      {hovered && (
+      {ready && hovered && (
         <div
           className="chart-tooltip"
           style={{
-            left: `${(hovered.x / width) * 100}%`,
-            top: `${(hovered.y / height) * 100}%`,
-            // Keep it on screen near the edges, and below the dot when the
-            // line is near the top.
-            transform: `translate(${
-              hovered.x / width < 0.12
-                ? "0%"
-                : hovered.x / width > 0.88
-                  ? "-100%"
-                  : "-50%"
-            }, ${hovered.y / height < 0.3 ? "14px" : "calc(-100% - 14px)"})`,
+            // Centered over the point, kept inside the chart at the edges,
+            // and below the point when it's near the top.
+            left: `${Math.min(Math.max(hovered.x, 64), width - 64)}px`,
+            top: `${hovered.y}px`,
+            transform: `translate(-50%, ${hovered.y < 64 ? "14px" : "calc(-100% - 14px)"})`,
           }}
         >
-          {formatLabel(points[hoveredIndex].timestamp)}
+          <strong>{money(points[hoveredIndex].value)}</strong>
+          <span>{formatLabel(points[hoveredIndex].timestamp)}</span>
         </div>
       )}
     </div>
@@ -398,13 +563,18 @@ function Dashboard({ refreshKey }) {
               formatLabel={(timestamp) =>
                 formatTimestamp(timestamp, TIMED_RANGES.has(range))
               }
+              formatAxis={(time) =>
+                new Date(time).toLocaleString(
+                  "en-US",
+                  range === "1D"
+                    ? { hour: "numeric", minute: "2-digit" }
+                    : range === "1Y" || range === "ALL"
+                      ? { month: "short", day: "numeric", year: "2-digit" }
+                      : { month: "short", day: "numeric" }
+                )
+              }
             />
           )}
-
-          <p className="chart-note">
-            Performance only: adding or removing cards doesn&apos;t move this
-            line, market price changes do.
-          </p>
         </div>
 
         <aside className="top-cards-panel">
