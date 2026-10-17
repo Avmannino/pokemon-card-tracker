@@ -318,7 +318,25 @@ PriceCharting card page, **Refresh Graded Cards** re-reads that page for the
 grade you own
 (PSA 8 → "Grade 8", PSA 9 → "Grade 9", PSA 10 → "PSA 10") and replaces your
 price with it. The collection then shows **PriceCharting** instead of
-**Manual**. PriceCharting's Grade 8 and Grade 9 cover every grading company,
+**Manual**.
+
+## Slab photos
+
+Graded cards can show PSA's photo of your actual slab. Raw cards keep the
+card art.
+
+1. Run `supabase/migrations/2026-10-17_slab_images.sql` in the Supabase SQL
+   Editor.
+2. Sign in at https://www.psacard.com/publicapi and copy your access token.
+   The free plan allows 100 lookups a day.
+3. Set it as `PSA_API_TOKEN` in the backend's environment (Render →
+   Environment).
+4. In the collection, click **Add cert #** on a graded card and enter the
+   cert number from its label. That's one PSA lookup, made only when you
+   save.
+
+Slabs PSA never photographed (mostly older ones) show the card art in a
+drawn slab instead. Changing a card's variant keeps its cert number. PriceCharting's Grade 8 and Grade 9 cover every grading company,
 not only PSA.
 
 ---

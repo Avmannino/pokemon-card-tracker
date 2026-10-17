@@ -141,6 +141,18 @@ def set_item_variant_confirmed(item_id: str, confirmed: bool = True) -> bool:
     )
 
 
+def set_item_slab(
+    item_id: str,
+    cert_number: str | None,
+    slab_images: dict[str, Any] | None,
+) -> None:
+    """Raises if the slab columns don't exist yet
+    (supabase/migrations/2026-10-17_slab_images.sql)."""
+    _client().table("collection_items").update(
+        {"psa_cert_number": cert_number, "slab_images": slab_images}
+    ).eq("id", item_id).execute()
+
+
 def migration_applied() -> bool:
     return not _missing_columns
 

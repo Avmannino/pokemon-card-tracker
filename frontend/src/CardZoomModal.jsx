@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { cardTitle, gradeLabel, money, variantLabel } from "./format.js";
+import ItemImage, { certUrl } from "./ItemImage.jsx";
 
 const CONFIDENCE_LABELS = {
   HIGH: "High confidence",
@@ -102,6 +103,12 @@ export function useCardZoom() {
 }
 
 function CardZoomModal({ card, onClose }) {
+  const [side, setSide] = useState("front");
+
+  useEffect(() => {
+    setSide("front");
+  }, [card]);
+
   useEffect(() => {
     if (!card) {
       return undefined;
@@ -121,6 +128,10 @@ function CardZoomModal({ card, onClose }) {
     return null;
   }
 
+  // Collection items (graded ones may have a slab photo); search results
+  // only have the card.
+  const item = card.owned?.item;
+
   return (
     <div className="modal-backdrop card-zoom-backdrop" onClick={onClose}>
       <figure
@@ -135,11 +146,36 @@ function CardZoomModal({ card, onClose }) {
           ×
         </button>
 
-        <img src={card.image_url} alt={cardTitle(card)} />
+        {item ? (
+          <ItemImage item={item} side={side} />
+        ) : (
+          <img src={card.image_url} alt={cardTitle(card)} />
+        )}
+
+        {item?.slab_images?.back && (
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => setSide(side === "front" ? "back" : "front")}
+          >
+            {side === "front" ? "Show back" : "Show front"}
+          </button>
+        )}
 
         <figcaption>
           <strong>{cardTitle(card)}</strong>
           {card.set_name && <span>{card.set_name}</span>}
+
+          {item?.psa_cert_number && (
+            <a
+              className="manual-source-link"
+              href={certUrl(item.psa_cert_number)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              PSA cert #{item.psa_cert_number}
+            </a>
+          )}
 
           {card.owned && (
             <div className="card-zoom-price">

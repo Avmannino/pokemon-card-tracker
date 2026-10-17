@@ -3,14 +3,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from . import db
 from .config import settings
-from .schemas import AddCollectionRequest, GradedValuesRequest, VariantChangeRequest
-from .services import poketrace, price_sync
+from .schemas import (
+    AddCollectionRequest,
+    GradedValuesRequest,
+    SlabRequest,
+    VariantChangeRequest,
+)
+from .services import poketrace, price_sync, psa
 from .services.portfolio import build_dashboard, lot_price, value_change
 from .services.valuation import (
     build_market_values,
@@ -370,6 +376,59 @@ def _book_removal_or_refuse(item: dict[str, Any], quantity: int | None) -> dict[
     )
 
 
+@app.put("/api/collection/{item_id}/slab")
+async def set_collection_slab(
+    item_id: str,
+    request: SlabRequest,
+) -> dict[str, Any]:
+    """Saves the PSA cert number on a graded copy's label and looks up PSA's
+    photos of that slab (one PSA request). An empty cert number removes
+    both."""
+    item = db.get_collection_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Card not found in your collection.")
+    if item["ownership_grade"] == "RAW":
+        raise HTTPException(status_code=400, detail="Only graded cards have a slab.")
+
+    try:
+        cert_number = psa.clean_cert_number(request.cert_number)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    slab_images = None
+    if cert_number:
+        try:
+            images = await psa.get_slab_images(cert_number)
+        except psa.PSAError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Couldn't reach PSA: {exc}"
+            ) from exc
+
+        slab_images = {**images, "fetched_at": db.utc_now_iso()}
+
+    try:
+        db.set_item_slab(item_id, cert_number, slab_images)
+    except Exception as exc:
+        if "psa_cert_number" in str(exc) or "slab_images" in str(exc) or "PGRST204" in str(exc):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Run supabase/migrations/2026-10-17_slab_images.sql in "
+                    "Supabase first."
+                ),
+            ) from exc
+        raise
+
+    return {
+        "item": serialize_collection_item(
+            db.get_collection_item(item_id) or item,
+            db.get_card(item["card_id"]),
+        ),
+    }
+
+
 @app.post("/api/collection/{item_id}/variant")
 async def set_collection_variant(
     item_id: str,
@@ -472,6 +531,13 @@ async def set_collection_variant(
         raise
 
     db.set_item_variant_confirmed(new_item["id"])
+
+    # Same physical slab, so its cert number and photos come along.
+    if item.get("psa_cert_number"):
+        try:
+            db.set_item_slab(new_item["id"], item["psa_cert_number"], item.get("slab_images"))
+        except Exception:
+            logging.getLogger("main").exception("Couldn't carry the slab over")
 
     return {
         "changed": True,

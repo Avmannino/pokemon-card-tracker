@@ -7,11 +7,13 @@ import {
   getRefreshStatus,
   saveGradedValues,
   searchCards,
+  setCollectionSlab,
   setCollectionVariant,
   startGradedRefresh,
   startSync,
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
+import ItemImage from "./ItemImage.jsx";
 import Dashboard from "./Dashboard.jsx";
 import {
   money,
@@ -185,6 +187,7 @@ function ownedDetails(item) {
     quantity: item.quantity,
     valuation: item.market_values?.[item.ownership_grade],
     variant: item.card.variant,
+    item,
   };
 }
 
@@ -305,6 +308,9 @@ function App() {
   const [variantItem, setVariantItem] = useState(null);
   const [variantChoice, setVariantChoice] = useState("");
   const [savingVariant, setSavingVariant] = useState(false);
+  const [slabItem, setSlabItem] = useState(null);
+  const [slabCert, setSlabCert] = useState("");
+  const [savingSlab, setSavingSlab] = useState(false);
   const [dashboardVersion, setDashboardVersion] = useState(0);
   const { zoomedCard, openZoom, closeZoom } = useCardZoom();
 
@@ -676,6 +682,35 @@ function App() {
     }
   }
 
+  function openSlab(item) {
+    setSlabItem(item);
+    setSlabCert(item.psa_cert_number || "");
+  }
+
+  // One PSA lookup per save; an empty cert number removes it.
+  async function saveSlab(certNumber) {
+    setSavingSlab(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const { item } = await setCollectionSlab(slabItem.id, certNumber);
+      setSlabItem(null);
+      await loadCollection();
+      setMessage(
+        !certNumber
+          ? "Cert number removed."
+          : item?.slab_images?.front
+            ? "Slab photo added."
+            : "Cert number saved. PSA has no photos of this slab, so it shows a drawn slab."
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingSlab(false);
+    }
+  }
+
   async function handleSavePsa(event) {
     event.preventDefault();
 
@@ -1020,11 +1055,9 @@ function App() {
           >
             {sortedItems.map((item) => (
               <article className="gallery-card" key={item.id}>
-                {item.card.image_url ? (
-                  <img
-                    className="thumb-clickable"
-                    src={item.card.image_url}
-                    alt={cardTitle(item.card)}
+                {item.card.image_url || item.slab_images?.front ? (
+                  <ItemImage
+                    item={item}
                     onClick={() => openZoom(item.card, ownedDetails(item))}
                   />
                 ) : (
@@ -1101,16 +1134,13 @@ function App() {
                   <tr key={item.id}>
                     <td>
                       <div className="table-card-cell">
-                        {item.card.image_url && (
-                          <img
-                            className="thumb-clickable"
-                            src={item.card.image_url}
-                            alt={cardTitle(item.card)}
-                            onClick={() =>
-                              openZoom(item.card, ownedDetails(item))
-                            }
-                          />
-                        )}
+                        <ItemImage
+                          item={item}
+                          compact
+                          onClick={() =>
+                            openZoom(item.card, ownedDetails(item))
+                          }
+                        />
 
                         <div>
                           <strong>
@@ -1243,6 +1273,16 @@ function App() {
                         >
                           PSA values
                         </button>
+
+                        {item.ownership_grade !== "RAW" && (
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => openSlab(item)}
+                          >
+                            {item.psa_cert_number ? "Slab" : "Add cert #"}
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -1628,6 +1668,77 @@ function App() {
                   : variantChoice === variantItem.card.poketrace_id
                     ? "Confirm variant"
                     : "Switch variant"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {slabItem && (
+        <div className="modal-backdrop">
+          <form
+            className="modal"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveSlab(slabCert.trim());
+            }}
+          >
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">YOUR SLAB</p>
+                <h2>{cardTitle(slabItem.card)}</h2>
+                <span>{gradeLabel(slabItem.ownership_grade)}</span>
+              </div>
+
+              <button
+                type="button"
+                className="close-button"
+                onClick={() => setSlabItem(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="modal-tip">
+              Enter the cert number from the slab's label to show PSA's photo
+              of your slab. Slabs PSA never photographed (mostly older ones)
+              show a drawn slab instead.
+            </p>
+
+            <label>
+              PSA cert number
+
+              <input
+                value={slabCert}
+                onChange={(event) => setSlabCert(event.target.value)}
+                inputMode="numeric"
+                placeholder="e.g. 12345678"
+                autoFocus
+              />
+            </label>
+
+            <div className="modal-actions">
+              {slabItem.psa_cert_number && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => saveSlab("")}
+                  disabled={savingSlab}
+                >
+                  Remove
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setSlabItem(null)}
+              >
+                Cancel
+              </button>
+
+              <button type="submit" disabled={savingSlab || !slabCert.trim()}>
+                {savingSlab ? "Looking up…" : "Save"}
               </button>
             </div>
           </form>

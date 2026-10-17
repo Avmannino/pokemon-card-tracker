@@ -26,6 +26,8 @@ class Settings:
         self.poketrace_api_key = os.getenv("POKETRACE_API_KEY", "").strip()
         # Optional: graded (PSA) prices are only pulled when this is set.
         self.rapidapi_key = os.getenv("RAPIDAPI_KEY", "").strip()
+        # Optional: slab photos are only looked up when this is set.
+        self.psa_api_token = os.getenv("PSA_API_TOKEN", "").strip()
         self.frontend_origin = os.getenv(
             "FRONTEND_ORIGIN",
             "http://localhost:5173",

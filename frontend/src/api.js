@@ -66,6 +66,15 @@ export function setCollectionVariant(itemId, poketraceId) {
   });
 }
 
+// Saves the PSA cert number on a graded copy (empty removes it) and looks up
+// PSA's photos of that slab.
+export function setCollectionSlab(itemId, certNumber) {
+  return request(`/api/collection/${itemId}/slab`, {
+    method: "PUT",
+    body: JSON.stringify({ cert_number: certNumber || null }),
+  });
+}
+
 export function getRefreshStatus() {
   return request("/api/refresh-status");
 }
