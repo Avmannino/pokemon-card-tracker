@@ -20,6 +20,10 @@ Thumbs.db
 .idea/
 *:Zone.Identifier
 
+# Original slab photos (shrunk copies are in frontend/public/slabs/)
+slab-photos/*
+!slab-photos/README.md
+
 # Local tool config
 .claude/
 
