@@ -125,5 +125,4 @@ alter table public.collection_items
 
 -- Slab photos (also in supabase/migrations/2026-10-17_slab_images.sql).
 alter table public.collection_items
-    add column if not exists psa_cert_number text,
-    add column if not exists slab_images jsonb;
+    add column if not exists psa_cert_number text;

@@ -6,15 +6,15 @@ export function certUrl(certNumber) {
   return `https://www.psacard.com/cert/${certNumber}`;
 }
 
-// The photo of a graded item's slab ("front" or "back"): yours when you
-// added one for its cert number, else PSA's. Null for raw cards.
+// The photo of a graded item's slab ("front" or "back") for its cert
+// number, or null (raw cards, or no photo added).
 export function slabPhoto(item, side = "front") {
   if (item.ownership_grade === "RAW") {
     return null;
   }
 
-  const own = slabPhotos[item.psa_cert_number]?.[side];
-  return own ? `${import.meta.env.BASE_URL}${own}` : item.slab_images?.[side] || null;
+  const photo = slabPhotos[item.psa_cert_number]?.[side];
+  return photo ? `${import.meta.env.BASE_URL}${photo}` : null;
 }
 
 // A collection item's picture. Raw cards show the card art. Graded cards

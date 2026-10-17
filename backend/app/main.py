@@ -1,9 +1,9 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -16,7 +16,7 @@ from .schemas import (
     SlabRequest,
     VariantChangeRequest,
 )
-from .services import poketrace, price_sync, psa
+from .services import poketrace, price_sync
 from .services.portfolio import build_dashboard, lot_price, value_change
 from .services.valuation import (
     build_market_values,
@@ -381,33 +381,27 @@ async def set_collection_slab(
     item_id: str,
     request: SlabRequest,
 ) -> dict[str, Any]:
-    """Saves the PSA cert number on a graded copy's label. With
-    PSA_API_TOKEN set it also looks up PSA's photos of that slab (one PSA
-    request); a failed lookup still saves the cert number, since your own
-    photos are matched by it. An empty cert number removes both."""
+    """Saves the PSA cert number on a graded copy's label; your slab photos
+    (frontend/src/slabPhotos.json) are matched to the card by it. An empty
+    cert number removes it."""
     item = db.get_collection_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Card not found in your collection.")
     if item["ownership_grade"] == "RAW":
         raise HTTPException(status_code=400, detail="Only graded cards have a slab.")
 
-    try:
-        cert_number = psa.clean_cert_number(request.cert_number)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    slab_images = None
-    if cert_number and psa.is_configured():
-        try:
-            images = await psa.get_slab_images(cert_number)
-            slab_images = {**images, "fetched_at": db.utc_now_iso()}
-        except (psa.PSAError, httpx.HTTPError):
-            logging.getLogger("main").exception("PSA photo lookup failed")
+    # Digits only ("#12 345 678" -> "12345678").
+    cert_number = re.sub(r"[\s#-]", "", request.cert_number or "") or None
+    if cert_number and not (cert_number.isdigit() and 4 <= len(cert_number) <= 12):
+        raise HTTPException(
+            status_code=400,
+            detail="A PSA cert number is the 8 or 9 digits on the slab's label.",
+        )
 
     try:
-        db.set_item_slab(item_id, cert_number, slab_images)
+        db.set_item_cert(item_id, cert_number)
     except Exception as exc:
-        if "psa_cert_number" in str(exc) or "slab_images" in str(exc) or "PGRST204" in str(exc):
+        if "psa_cert_number" in str(exc) or "PGRST204" in str(exc):
             raise HTTPException(
                 status_code=503,
                 detail=(
@@ -528,10 +522,10 @@ async def set_collection_variant(
 
     db.set_item_variant_confirmed(new_item["id"])
 
-    # Same physical slab, so its cert number and photos come along.
+    # Same physical slab, so its cert number (and so its photo) comes along.
     if item.get("psa_cert_number"):
         try:
-            db.set_item_slab(new_item["id"], item["psa_cert_number"], item.get("slab_images"))
+            db.set_item_cert(new_item["id"], item["psa_cert_number"])
         except Exception:
             logging.getLogger("main").exception("Couldn't carry the slab over")
 

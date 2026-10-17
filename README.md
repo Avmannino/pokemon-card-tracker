@@ -333,11 +333,7 @@ art.
    cert number from its label.
 
 Graded cards without a photo show the card art in a drawn slab. Changing a
-card's variant keeps its cert number.
-
-PSA's Public API can also supply slab photos if `PSA_API_TOKEN` is set, but
-PSA only answers accounts it has approved (collectors-apis@collectors.com).
-Without approval the lookup fails quietly and your own photos are used. PriceCharting's Grade 8 and Grade 9 cover every grading company,
+card's variant keeps its cert number. PriceCharting's Grade 8 and Grade 9 cover every grading company,
 not only PSA.
 
 ---
