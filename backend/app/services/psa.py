@@ -49,13 +49,17 @@ async def get_slab_images(cert_number: str) -> dict[str, Any]:
             headers={"Authorization": f"bearer {settings.psa_api_token}"},
         )
 
+    said = response.text.strip().strip('"')[:200] or "no message"
+
     if response.status_code == 429:
-        raise PSAError("PSA's daily limit (100 lookups) is used up. Try again tomorrow.")
+        raise PSAError(f"PSA's daily limit is used up ({said}). Try again tomorrow.")
     if response.status_code in (401, 403, 500):
         # PSA reports a bad or expired token as a 500.
+        logger.warning("PSA rejected cert %s: HTTP %s %s", cert_number, response.status_code, said)
         raise PSAError(
-            f"PSA rejected the lookup (HTTP {response.status_code}). This usually "
-            "means PSA_API_TOKEN is wrong or expired."
+            f"PSA rejected the lookup (HTTP {response.status_code}: {said}). Check "
+            "PSA_API_TOKEN in Render: only the token itself, no quotes or "
+            "\"bearer\"."
         )
     response.raise_for_status()
 
