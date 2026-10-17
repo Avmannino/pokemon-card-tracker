@@ -1,5 +1,4 @@
 import logging
-import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -13,7 +12,6 @@ from .config import settings
 from .schemas import (
     AddCollectionRequest,
     GradedValuesRequest,
-    SlabRequest,
     VariantChangeRequest,
 )
 from .services import poketrace, price_sync
@@ -374,49 +372,6 @@ def _book_removal_or_refuse(item: dict[str, Any], quantity: int | None) -> dict[
         occurred_at=now.isoformat(),
         market_value_per_card=price,
     )
-
-
-@app.put("/api/collection/{item_id}/slab")
-async def set_collection_slab(
-    item_id: str,
-    request: SlabRequest,
-) -> dict[str, Any]:
-    """Saves the PSA cert number on a graded copy's label; your slab photos
-    (frontend/src/slabPhotos.json) are matched to the card by it. An empty
-    cert number removes it."""
-    item = db.get_collection_item(item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Card not found in your collection.")
-    if item["ownership_grade"] == "RAW":
-        raise HTTPException(status_code=400, detail="Only graded cards have a slab.")
-
-    # Digits only ("#12 345 678" -> "12345678").
-    cert_number = re.sub(r"[\s#-]", "", request.cert_number or "") or None
-    if cert_number and not (cert_number.isdigit() and 4 <= len(cert_number) <= 12):
-        raise HTTPException(
-            status_code=400,
-            detail="A PSA cert number is the 8 or 9 digits on the slab's label.",
-        )
-
-    try:
-        db.set_item_cert(item_id, cert_number)
-    except Exception as exc:
-        if "psa_cert_number" in str(exc) or "PGRST204" in str(exc):
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Run supabase/migrations/2026-10-17_slab_images.sql in "
-                    "Supabase first."
-                ),
-            ) from exc
-        raise
-
-    return {
-        "item": serialize_collection_item(
-            db.get_collection_item(item_id) or item,
-            db.get_card(item["card_id"]),
-        ),
-    }
 
 
 @app.post("/api/collection/{item_id}/variant")

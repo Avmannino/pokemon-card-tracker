@@ -40,11 +40,6 @@ class AddCollectionRequest(BaseModel):
     variant_siblings: list[VariantOption] | None = None
 
 
-class SlabRequest(BaseModel):
-    # The cert number on the slab's label; empty removes it.
-    cert_number: str | None = Field(default=None, max_length=32)
-
-
 class VariantChangeRequest(BaseModel):
     # PokeTrace id of the variant you actually own; the card's current id
     # just confirms it.

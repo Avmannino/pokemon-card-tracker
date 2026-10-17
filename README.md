@@ -329,8 +329,8 @@ art.
    Editor.
 2. Add your photos to `slab-photos/` as described in
    `slab-photos/README.md`, then run `python3 scripts/slab_photos.py`.
-3. In the collection, click **Add cert #** on a graded card and enter the
-   cert number from its label.
+3. Set the card's cert number in Supabase: the `psa_cert_number` column of
+   its `collection_items` row.
 
 Graded cards without a photo show the card art in a drawn slab. Changing a
 card's variant keeps its cert number. PriceCharting's Grade 8 and Grade 9 cover every grading company,

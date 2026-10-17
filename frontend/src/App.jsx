@@ -7,7 +7,6 @@ import {
   getRefreshStatus,
   saveGradedValues,
   searchCards,
-  setCollectionSlab,
   setCollectionVariant,
   startGradedRefresh,
   startSync,
@@ -308,9 +307,6 @@ function App() {
   const [variantItem, setVariantItem] = useState(null);
   const [variantChoice, setVariantChoice] = useState("");
   const [savingVariant, setSavingVariant] = useState(false);
-  const [slabItem, setSlabItem] = useState(null);
-  const [slabCert, setSlabCert] = useState("");
-  const [savingSlab, setSavingSlab] = useState(false);
   const [dashboardVersion, setDashboardVersion] = useState(0);
   const { zoomedCard, openZoom, closeZoom } = useCardZoom();
 
@@ -679,35 +675,6 @@ function App() {
       setError(err.message);
     } finally {
       setSavingVariant(false);
-    }
-  }
-
-  function openSlab(item) {
-    setSlabItem(item);
-    setSlabCert(item.psa_cert_number || "");
-  }
-
-  // An empty cert number removes it.
-  async function saveSlab(certNumber) {
-    setSavingSlab(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { item } = await setCollectionSlab(slabItem.id, certNumber);
-      setSlabItem(null);
-      await loadCollection();
-      setMessage(
-        !certNumber
-          ? "Cert number removed."
-          : item && slabPhoto(item)
-            ? "Slab photo added."
-            : "Cert number saved. There's no photo for this cert yet, so it shows a drawn slab."
-      );
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSavingSlab(false);
     }
   }
 
@@ -1274,16 +1241,6 @@ function App() {
                           PSA values
                         </button>
 
-                        {item.ownership_grade !== "RAW" && (
-                          <button
-                            type="button"
-                            className="text-button"
-                            onClick={() => openSlab(item)}
-                          >
-                            {item.psa_cert_number ? "Slab" : "Add cert #"}
-                          </button>
-                        )}
-
                         <button
                           type="button"
                           className="text-button danger"
@@ -1668,77 +1625,6 @@ function App() {
                   : variantChoice === variantItem.card.poketrace_id
                     ? "Confirm variant"
                     : "Switch variant"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {slabItem && (
-        <div className="modal-backdrop">
-          <form
-            className="modal"
-            onSubmit={(event) => {
-              event.preventDefault();
-              saveSlab(slabCert.trim());
-            }}
-          >
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">YOUR SLAB</p>
-                <h2>{cardTitle(slabItem.card)}</h2>
-                <span>{gradeLabel(slabItem.ownership_grade)}</span>
-              </div>
-
-              <button
-                type="button"
-                className="close-button"
-                onClick={() => setSlabItem(null)}
-              >
-                ×
-              </button>
-            </div>
-
-            <p className="modal-tip">
-              Enter the cert number from the slab's label. Your photo for
-              that cert (slab-photos/PSA-&lt;cert&gt;-front.jpg) is shown on
-              this card; without one, it shows a drawn slab.
-            </p>
-
-            <label>
-              PSA cert number
-
-              <input
-                value={slabCert}
-                onChange={(event) => setSlabCert(event.target.value)}
-                inputMode="numeric"
-                placeholder="e.g. 12345678"
-                autoFocus
-              />
-            </label>
-
-            <div className="modal-actions">
-              {slabItem.psa_cert_number && (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => saveSlab("")}
-                  disabled={savingSlab}
-                >
-                  Remove
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setSlabItem(null)}
-              >
-                Cancel
-              </button>
-
-              <button type="submit" disabled={savingSlab || !slabCert.trim()}>
-                {savingSlab ? "Looking up…" : "Save"}
               </button>
             </div>
           </form>
