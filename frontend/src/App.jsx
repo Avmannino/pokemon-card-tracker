@@ -13,7 +13,7 @@ import {
   startSync,
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
-import ItemImage from "./ItemImage.jsx";
+import ItemImage, { slabPhoto } from "./ItemImage.jsx";
 import Dashboard from "./Dashboard.jsx";
 import {
   money,
@@ -687,7 +687,7 @@ function App() {
     setSlabCert(item.psa_cert_number || "");
   }
 
-  // One PSA lookup per save; an empty cert number removes it.
+  // An empty cert number removes it.
   async function saveSlab(certNumber) {
     setSavingSlab(true);
     setError("");
@@ -700,9 +700,9 @@ function App() {
       setMessage(
         !certNumber
           ? "Cert number removed."
-          : item?.slab_images?.front
+          : item && slabPhoto(item)
             ? "Slab photo added."
-            : "Cert number saved. PSA has no photos of this slab, so it shows a drawn slab."
+            : "Cert number saved. There's no photo for this cert yet, so it shows a drawn slab."
       );
     } catch (err) {
       setError(err.message);
@@ -1055,7 +1055,7 @@ function App() {
           >
             {sortedItems.map((item) => (
               <article className="gallery-card" key={item.id}>
-                {item.card.image_url || item.slab_images?.front ? (
+                {item.card.image_url || slabPhoto(item) ? (
                   <ItemImage
                     item={item}
                     onClick={() => openZoom(item.card, ownedDetails(item))}
@@ -1700,9 +1700,9 @@ function App() {
             </div>
 
             <p className="modal-tip">
-              Enter the cert number from the slab's label to show PSA's photo
-              of your slab. Slabs PSA never photographed (mostly older ones)
-              show a drawn slab instead.
+              Enter the cert number from the slab's label. Your photo for
+              that cert (slab-photos/PSA-&lt;cert&gt;-front.jpg) is shown on
+              this card; without one, it shows a drawn slab.
             </p>
 
             <label>

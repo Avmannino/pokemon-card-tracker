@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { cardTitle, gradeLabel, money, variantLabel } from "./format.js";
-import ItemImage, { certUrl } from "./ItemImage.jsx";
+import ItemImage, { certUrl, slabPhoto } from "./ItemImage.jsx";
 
 const CONFIDENCE_LABELS = {
   HIGH: "High confidence",
@@ -152,7 +152,7 @@ function CardZoomModal({ card, onClose }) {
           <img src={card.image_url} alt={cardTitle(card)} />
         )}
 
-        {item?.slab_images?.back && (
+        {item && slabPhoto(item, "back") && (
           <button
             type="button"
             className="text-button"

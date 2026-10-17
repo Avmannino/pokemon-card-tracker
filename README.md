@@ -322,21 +322,22 @@ price with it. The collection then shows **PriceCharting** instead of
 
 ## Slab photos
 
-Graded cards can show PSA's photo of your actual slab. Raw cards keep the
-card art.
+Graded cards can show a photo of your actual slab. Raw cards keep the card
+art.
 
 1. Run `supabase/migrations/2026-10-17_slab_images.sql` in the Supabase SQL
    Editor.
-2. Sign in at https://www.psacard.com/publicapi and copy your access token.
-   The free plan allows 100 lookups a day.
-3. Set it as `PSA_API_TOKEN` in the backend's environment (Render →
-   Environment).
-4. In the collection, click **Add cert #** on a graded card and enter the
-   cert number from its label. That's one PSA lookup, made only when you
-   save.
+2. Add your photos to `slab-photos/` as described in
+   `slab-photos/README.md`, then run `python3 scripts/slab_photos.py`.
+3. In the collection, click **Add cert #** on a graded card and enter the
+   cert number from its label.
 
-Slabs PSA never photographed (mostly older ones) show the card art in a
-drawn slab instead. Changing a card's variant keeps its cert number. PriceCharting's Grade 8 and Grade 9 cover every grading company,
+Graded cards without a photo show the card art in a drawn slab. Changing a
+card's variant keeps its cert number.
+
+PSA's Public API can also supply slab photos if `PSA_API_TOKEN` is set, but
+PSA only answers accounts it has approved (collectors-apis@collectors.com).
+Without approval the lookup fails quietly and your own photos are used. PriceCharting's Grade 8 and Grade 9 cover every grading company,
 not only PSA.
 
 ---

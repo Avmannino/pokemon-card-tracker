@@ -381,9 +381,10 @@ async def set_collection_slab(
     item_id: str,
     request: SlabRequest,
 ) -> dict[str, Any]:
-    """Saves the PSA cert number on a graded copy's label and looks up PSA's
-    photos of that slab (one PSA request). An empty cert number removes
-    both."""
+    """Saves the PSA cert number on a graded copy's label. With
+    PSA_API_TOKEN set it also looks up PSA's photos of that slab (one PSA
+    request); a failed lookup still saves the cert number, since your own
+    photos are matched by it. An empty cert number removes both."""
     item = db.get_collection_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Card not found in your collection.")
@@ -396,17 +397,12 @@ async def set_collection_slab(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     slab_images = None
-    if cert_number:
+    if cert_number and psa.is_configured():
         try:
             images = await psa.get_slab_images(cert_number)
-        except psa.PSAError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(
-                status_code=502, detail=f"Couldn't reach PSA: {exc}"
-            ) from exc
-
-        slab_images = {**images, "fetched_at": db.utc_now_iso()}
+            slab_images = {**images, "fetched_at": db.utc_now_iso()}
+        except (psa.PSAError, httpx.HTTPError):
+            logging.getLogger("main").exception("PSA photo lookup failed")
 
     try:
         db.set_item_slab(item_id, cert_number, slab_images)
