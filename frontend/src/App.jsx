@@ -209,11 +209,11 @@ function chunk(items, size) {
 // key === null means the column can't be sorted.
 const COLLECTION_COLUMNS = [
   { key: "card", label: "Card", numeric: false },
+  { key: "qty", label: "Qty", numeric: true },
   { key: "each", label: "Market Value", numeric: true },
   { key: "change_1D", label: "1D", numeric: true, window: "1D" },
   { key: "change_1W", label: "1W", numeric: true, window: "1W" },
   { key: "change_1M", label: "1M", numeric: true, window: "1M" },
-  { key: "qty", label: "Qty", numeric: true },
   { key: "owned", label: "You Own", numeric: true },
   { key: "value", label: "Your Value", numeric: true },
   { key: null, label: "Actions", numeric: false },
@@ -1158,6 +1158,12 @@ function App() {
                     </td>
 
                     <td>
+                      <strong className="qty-cell">
+                        {item.quantity}
+                      </strong>
+                    </td>
+
+                    <td>
                       <div className="price-cell">
                         <strong>
                           {money(
@@ -1214,12 +1220,6 @@ function App() {
                         </td>
                       )
                     )}
-
-                    <td>
-                      <strong className="qty-cell">
-                        {item.quantity}
-                      </strong>
-                    </td>
 
                     <td>
                       <div className="owned-cell">
