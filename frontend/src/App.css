@@ -1560,7 +1560,7 @@ h2 {
 .collection-table {
   width: 100%;
 
-  min-width: 860px;
+  min-width: 1040px;
 
   border-collapse: collapse;
 }
@@ -1685,29 +1685,41 @@ h2 {
   gap: 3px;
 }
 
-.table-card-cell .trend-arrow {
-  margin-left: 8px;
+/* 1D / 1W / 1M change of the grade you own. */
+.change-cell {
+  display: flex;
 
-  font-size: 0.74rem;
-  font-weight: 700;
+  flex-direction: column;
+
+  gap: 2px;
+
+  font-variant-numeric: tabular-nums;
 
   white-space: nowrap;
 
   cursor: help;
 }
 
-.table-card-cell .trend-arrow.up {
+.change-cell strong {
+  font-size: 0.82rem;
+}
+
+.change-cell span {
+  font-size: 0.72rem;
+
+  opacity: 0.75;
+}
+
+.change-cell.up {
   color: #5fe3a4;
 }
 
-.table-card-cell .trend-arrow.down {
+.change-cell.down {
   color: #f18a8a;
 }
 
-.table-card-cell .trend-arrow.flat {
+.change-cell.flat {
   color: #737f93;
-
-  font-weight: 600;
 }
 
 .table-card-cell strong {

@@ -645,10 +645,32 @@ def value_change(
     last `days_back` days. Never substitutes another grade: a PSA 10 with no
     PSA 10 history reports that, not the raw card's movement."""
     now = now or datetime.now(timezone.utc)
-    series = PriceSeries(snapshots, grade, card)
+    return _change(PriceSeries(snapshots, grade, card), grade, days_back, now)
 
+
+# The per-card change windows shown in the collection.
+CHANGE_WINDOWS = {"1D": 1, "1W": 7, "1M": 30}
+
+
+def value_changes(
+    snapshots: list[dict[str, Any]],
+    grade: str,
+    now: datetime | None = None,
+    card: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """value_change for each of CHANGE_WINDOWS, from one price history."""
+    now = now or datetime.now(timezone.utc)
+    series = PriceSeries(snapshots, grade, card)
+    return {
+        name: _change(series, grade, days, now)
+        for name, days in CHANGE_WINDOWS.items()
+    }
+
+
+def _change(series: PriceSeries, grade: str, days_back: int, now: datetime) -> dict[str, Any]:
+    start = now - timedelta(days=days_back)
     current = series.at(now)
-    past = series.at(now - timedelta(days=days_back))
+    past = series.at(start)
     has_price = current is not None and past is not None
 
     result = {
@@ -659,6 +681,13 @@ def value_change(
         # False while there's only one day of prices for this grade, so a $0
         # change means "no history yet" rather than "hasn't moved".
         "has_history": has_price and len(series.observed_days) > 1,
+        # When prices only go back part of the window: the change is then
+        # measured from the first price, at this time.
+        "since": (
+            series.times[0].isoformat()
+            if series.times and series.times[0] > start
+            else None
+        ),
         "change": None,
         "change_pct": None,
     }

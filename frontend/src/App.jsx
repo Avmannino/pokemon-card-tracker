@@ -120,11 +120,20 @@ function syncSummary(status) {
   );
 }
 
-// The weekly move of the grade you own - a PSA 10 shows PSA 10 movement,
+const WINDOW_NAMES = { "1D": "day", "1W": "week", "1M": "month" };
+
+function shortDay(value) {
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+// One window's move of the grade you own - a PSA 10 shows PSA 10 movement,
 // never the raw card's.
-function TrendBadge({ change }) {
+function ChangeCell({ change, window }) {
   if (!change) {
-    return null;
+    return <span className="change-cell flat">—</span>;
   }
 
   const label = change.grade_label || gradeLabel(change.grade || "RAW");
@@ -132,35 +141,32 @@ function TrendBadge({ change }) {
   if (!change.has_history || change.change === null) {
     return (
       <span
-        className="trend-arrow flat"
+        className="change-cell flat"
         title={`Not enough ${label} price history yet`}
       >
-        – New
+        —
       </span>
     );
   }
 
-  if (!change.change) {
-    return (
-      <span
-        className="trend-arrow flat"
-        title={`${label} value unchanged over the past week`}
-      >
-        ▬ $0.00 (0.00%)
-      </span>
-    );
-  }
-
-  const up = change.change > 0;
+  const direction =
+    change.change > 0 ? "up" : change.change < 0 ? "down" : "flat";
+  const title =
+    `${label} value over the past ${WINDOW_NAMES[window]}` +
+    (change.since ? ` (since ${shortDay(change.since)}, its first price)` : "");
 
   return (
-    <span
-      className={`trend-arrow ${up ? "up" : "down"}`}
-      title={`${label} value over the past week`}
-    >
-      {up ? "▲ +" : "▼ −"}
-      {money(Math.abs(change.change))}
-      {change.change_pct !== null && ` (${percent(change.change_pct)})`}
+    <span className={`change-cell ${direction}`} title={title}>
+      <strong>
+        {change.change_pct !== null
+          ? percent(change.change_pct)
+          : `${change.change < 0 ? "−" : "+"}${money(Math.abs(change.change))}`}
+      </strong>
+
+      <span>
+        {change.change < 0 ? "−" : "+"}
+        {money(Math.abs(change.change))}
+      </span>
     </span>
   );
 }
@@ -205,6 +211,9 @@ const COLLECTION_COLUMNS = [
   { key: "card", label: "Card", numeric: false },
   { key: "owned", label: "You Own", numeric: true },
   { key: "each", label: "Market Value", numeric: true },
+  { key: "change_1D", label: "1D", numeric: true, window: "1D" },
+  { key: "change_1W", label: "1W", numeric: true, window: "1W" },
+  { key: "change_1M", label: "1M", numeric: true, window: "1M" },
   { key: "qty", label: "Qty", numeric: true },
   { key: "value", label: "Your Value", numeric: true },
   { key: null, label: "Actions", numeric: false },
@@ -222,6 +231,12 @@ function sortValue(item, key) {
       return item.quantity;
     case "value":
       return item.owned_market_value_total;
+    case "change_1D":
+    case "change_1W":
+    case "change_1M": {
+      const change = item.owned_grade_changes?.[key.slice(7)];
+      return change?.has_history ? change.change_pct ?? change.change : null;
+    }
     default:
       return item.market_values?.[key]?.estimate;
   }
@@ -1110,11 +1125,7 @@ function App() {
                         />
 
                         <div>
-                          <strong>
-                            {cardTitle(item.card)}
-
-                            <TrendBadge change={item.owned_grade_change} />
-                          </strong>
+                          <strong>{cardTitle(item.card)}</strong>
 
                           <span>
                             {item.card.set_name ||
@@ -1202,6 +1213,17 @@ function App() {
                         )}
                       </div>
                     </td>
+
+                    {COLLECTION_COLUMNS.filter((column) => column.window).map(
+                      (column) => (
+                        <td key={column.key}>
+                          <ChangeCell
+                            change={item.owned_grade_changes?.[column.window]}
+                            window={column.window}
+                          />
+                        </td>
+                      )
+                    )}
 
                     <td>
                       <strong className="qty-cell">

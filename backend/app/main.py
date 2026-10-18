@@ -15,7 +15,7 @@ from .schemas import (
     VariantChangeRequest,
 )
 from .services import poketrace, price_sync
-from .services.portfolio import build_dashboard, lot_price, value_change
+from .services.portfolio import build_dashboard, lot_price, value_changes
 from .services.valuation import (
     build_market_values,
     is_manual_entry,
@@ -90,9 +90,9 @@ def serialize_collection_item(
         "card": card,
         "market_values": market_values,
         "owned_market_value_each": owned_estimate,
-        # The price movement of the grade you own (raw or PSA) - never another
-        # grade's movement standing in for it.
-        "owned_grade_change": value_change(snapshots, owned_grade, card=card),
+        # The price movement of the grade you own (raw or PSA) over a day, a
+        # week and a month - never another grade's movement standing in.
+        "owned_grade_changes": value_changes(snapshots, owned_grade, card=card),
         "variant_info": _variant_info(item, card),
         "owned_market_value_total": (
             round(owned_estimate * quantity, 2)
