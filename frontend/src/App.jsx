@@ -1199,7 +1199,14 @@ function App() {
                             </span>
                           )
                         ) : (
-                          <span>
+                          <button
+                            type="button"
+                            className="manual-source-link source-count-link"
+                            title="See where this price came from"
+                            onClick={() =>
+                              openZoom(item.card, ownedDetails(item))
+                            }
+                          >
                             {item.market_values?.[item.ownership_grade]
                               ?.source_count || 0}{" "}
                             source
@@ -1207,7 +1214,7 @@ function App() {
                               ?.source_count || 0) === 1
                               ? ""
                               : "s"}
-                          </span>
+                          </button>
                         )}
                       </div>
                     </td>

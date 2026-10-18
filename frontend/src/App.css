@@ -1771,6 +1771,34 @@ a.manual-source-link {
   text-underline-offset: 2px;
 }
 
+button.source-count-link {
+  padding: 0;
+
+  border: 0;
+
+  background: none;
+
+  color: #79a0ff;
+
+  cursor: pointer;
+
+  font: inherit;
+
+  font-size: 0.73rem;
+
+  text-decoration: underline;
+
+  text-decoration-color: rgba(121, 160, 255, 0.35);
+
+  text-underline-offset: 2px;
+}
+
+button.source-count-link:hover {
+  color: #a9c0ff;
+
+  text-decoration-color: currentColor;
+}
+
 a.manual-source-link:hover {
   color: #a9c0ff;
 
