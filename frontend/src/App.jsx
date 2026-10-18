@@ -152,8 +152,10 @@ function ChangeCell({ change, window }) {
   const direction =
     change.change > 0 ? "up" : change.change < 0 ? "down" : "flat";
   const title =
-    `${label} value over the past ${WINDOW_NAMES[window]}` +
-    (change.since ? ` (since ${shortDay(change.since)}, its first price)` : "");
+    window === "ADDED"
+      ? `${label} value per card since you added it on ${shortDay(change.added_at)}`
+      : `${label} value over the past ${WINDOW_NAMES[window]}` +
+        (change.since ? ` (since ${shortDay(change.since)}, its first price)` : "");
 
   return (
     <span className={`change-cell ${direction}`} title={title}>
@@ -214,12 +216,18 @@ const COLLECTION_COLUMNS = [
   { key: "change_1D", label: "1D", numeric: true, window: "1D" },
   { key: "change_1W", label: "1W", numeric: true, window: "1W" },
   { key: "change_1M", label: "1M", numeric: true, window: "1M" },
+  { key: "change_ADDED", label: "Since Added", numeric: true, window: "ADDED" },
   { key: "owned", label: "You Own", numeric: true },
   { key: "value", label: "Your Value", numeric: true },
   { key: null, label: "Actions", numeric: false },
 ];
 
 function sortValue(item, key) {
+  if (key.startsWith("change_")) {
+    const change = item.owned_grade_changes?.[key.slice(7)];
+    return change?.has_history ? change.change_pct ?? change.change : null;
+  }
+
   switch (key) {
     case "card":
       return cardTitle(item.card).toLowerCase();
@@ -231,12 +239,6 @@ function sortValue(item, key) {
       return item.quantity;
     case "value":
       return item.owned_market_value_total;
-    case "change_1D":
-    case "change_1W":
-    case "change_1M": {
-      const change = item.owned_grade_changes?.[key.slice(7)];
-      return change?.has_history ? change.change_pct ?? change.change : null;
-    }
     default:
       return item.market_values?.[key]?.estimate;
   }

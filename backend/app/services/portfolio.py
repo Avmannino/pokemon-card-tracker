@@ -657,14 +657,58 @@ def value_changes(
     grade: str,
     now: datetime | None = None,
     card: dict[str, Any] | None = None,
+    added_at: Any = None,
 ) -> dict[str, dict[str, Any]]:
-    """value_change for each of CHANGE_WINDOWS, from one price history."""
+    """value_change for each of CHANGE_WINDOWS, from one price history,
+    plus "ADDED" (the change since `added_at`) when it's given."""
     now = now or datetime.now(timezone.utc)
     series = PriceSeries(snapshots, grade, card)
-    return {
+    changes = {
         name: _change(series, grade, days, now)
         for name, days in CHANGE_WINDOWS.items()
     }
+
+    if added_at is not None:
+        changes["ADDED"] = _change_since_added(series, grade, parse_ts(added_at), now)
+
+    return changes
+
+
+def _change_since_added(
+    series: PriceSeries, grade: str, added_at: datetime, now: datetime
+) -> dict[str, Any]:
+    """From the price the card entered your collection at (the same entry
+    price the performance history books it at) to now."""
+    lot = Lot(
+        lot_id="",
+        card={},
+        grade=grade,
+        added_at=added_at,
+        quantity=0,
+        removals=[],
+        series=series,
+    )
+    entry = lot.entry_price
+    current = series.at(now)
+    has_price = entry is not None and current is not None
+
+    result = {
+        "grade": grade,
+        "grade_label": grade_label(grade),
+        "added_at": added_at.isoformat(),
+        "has_price": has_price,
+        "has_history": has_price,
+        "since": None,
+        "change": None,
+        "change_pct": None,
+    }
+
+    if has_price:
+        change = round(current - entry, 2)
+        result["change"] = change
+        result["change_pct"] = round((change / entry) * 100, 2) if entry else None
+
+    return result
 
 
 def _change(series: PriceSeries, grade: str, days_back: int, now: datetime) -> dict[str, Any]:

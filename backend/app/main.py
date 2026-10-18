@@ -92,7 +92,9 @@ def serialize_collection_item(
         "owned_market_value_each": owned_estimate,
         # The price movement of the grade you own (raw or PSA) over a day, a
         # week and a month - never another grade's movement standing in.
-        "owned_grade_changes": value_changes(snapshots, owned_grade, card=card),
+        "owned_grade_changes": value_changes(
+            snapshots, owned_grade, card=card, added_at=item.get("created_at")
+        ),
         "variant_info": _variant_info(item, card),
         "owned_market_value_total": (
             round(owned_estimate * quantity, 2)
