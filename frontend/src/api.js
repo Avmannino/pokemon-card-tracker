@@ -1,3 +1,20 @@
+import cardImages from "./cardImages.json";
+
+// Your own card images by card id, replacing the catalog's image_url.
+function applyCardImages(value) {
+  if (Array.isArray(value)) {
+    value.forEach(applyCardImages);
+  } else if (value && typeof value === "object") {
+    if ("image_url" in value && cardImages[value.id]) {
+      value.image_url = `${import.meta.env.BASE_URL}${cardImages[value.id]}`;
+    }
+
+    Object.values(value).forEach(applyCardImages);
+  }
+
+  return value;
+}
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
@@ -25,7 +42,7 @@ async function request(path, options = {}) {
     throw new Error(detail);
   }
 
-  return payload;
+  return applyCardImages(payload);
 }
 
 export function searchCards(query) {
