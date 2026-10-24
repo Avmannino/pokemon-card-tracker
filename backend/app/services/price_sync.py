@@ -19,9 +19,9 @@ logger = logging.getLogger("price_sync")
 # never trigger a second pull for a slot that already happened.
 STATE_PATH = Path(__file__).resolve().parents[2] / ".price_sync_state.json"
 
-# Two pulls a day against PokeTrace Free's 250 requests/day leaves room for
-# searches, so keep each pull well under half of that.
-MAX_CARDS_PER_PULL = 100
+# Cards are looked up 20 per PokeTrace request, so 300 cards is about 15
+# requests a sync - two syncs a day stay far under PokeTrace Free's 250.
+MAX_CARDS_PER_PULL = 300
 
 # PokeTrace Free burst limit is 1 request / 2 seconds (poketrace.py spaces
 # its own requests).
@@ -165,6 +165,7 @@ def _new_graded_record() -> dict[str, Any]:
         "failed": 0,
         "skipped": 0,
         "skipped_variant_ambiguous": 0,
+        "skipped_manual_price": 0,
         "stopped_early": None,
     }
 
@@ -181,20 +182,39 @@ def _new_pricecharting_record() -> dict[str, Any]:
     }
 
 
-def _card_ids_for_pull(
-    limit: int,
-    graded_first: bool = False,
-) -> tuple[list[str], int]:
+def _card_ids_for_pull(limit: int) -> tuple[list[str], int]:
     """(unique card ids to pull, how many were left out by `limit`). A card
-    held in several collection rows is pulled once. With `graded_first`,
-    cards you own graded come first, so they're never the ones cut off."""
+    held in several collection rows is pulled once."""
     items = db.get_collection_items()
-
-    if graded_first:
-        items = sorted(items, key=lambda item: item["ownership_grade"] == "RAW")
-
     unique_card_ids = list(dict.fromkeys(item["card_id"] for item in items))
     return unique_card_ids[:limit], max(0, len(unique_card_ids) - limit)
+
+
+def _graded_card_ids_for_pull(limit: int) -> tuple[list[str], int, int]:
+    """(card ids that need TCGGO's graded prices, how many were left out by
+    `limit`, how many cards were skipped because you priced them yourself).
+
+    Only cards you own graded: the collection shows only the grade you own,
+    so PSA prices for raw cards would go unused. And a grade you priced
+    yourself (typed in or from PriceCharting) always overrides TCGGO."""
+    graded = [
+        item for item in db.get_collection_items() if item["ownership_grade"] != "RAW"
+    ]
+    card_ids = list(dict.fromkeys(item["card_id"] for item in graded))
+
+    priced = {
+        (card_id, row["grade"])
+        for card_id, rows in db.get_price_snapshots_for_cards(card_ids).items()
+        for row in rows
+        if is_manual_entry(row)
+    }
+    needed = list(dict.fromkeys(
+        item["card_id"]
+        for item in graded
+        if (item["card_id"], item["ownership_grade"]) not in priced
+    ))
+
+    return needed[:limit], max(0, len(needed) - limit), len(card_ids) - len(needed)
 
 
 @asynccontextmanager
@@ -400,16 +420,17 @@ async def _pull_graded(
     record: dict[str, Any],
     siblings_by_card: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Pulls graded prices for the collection, counting results into
+    """Pulls graded prices for the cards you own graded and haven't priced
+    yourself (see _graded_card_ids_for_pull), counting results into
     `record`. Stops once TCGGO's remaining daily requests would no longer
     cover the scheduled syncs still to come before the quota resets, so no
     sync (manual or scheduled) can push the day into paid overage.
 
-    Cards you own graded go first. A card whose TCGPlayer product covers
-    several variants is skipped without a request: TCGGO only knows the
-    product, so its graded sales couldn't be tied to your variant."""
-    card_ids, record["skipped"] = _card_ids_for_pull(
-        MAX_GRADED_CARDS_PER_PULL, graded_first=True
+    A card whose TCGPlayer product covers several variants is skipped
+    without a request: TCGGO only knows the product, so its graded sales
+    couldn't be tied to your variant."""
+    card_ids, record["skipped"], record["skipped_manual_price"] = (
+        _graded_card_ids_for_pull(MAX_GRADED_CARDS_PER_PULL)
     )
     siblings_by_card = siblings_by_card or {}
     _progress.update(phase="graded", done=0, total=len(card_ids))

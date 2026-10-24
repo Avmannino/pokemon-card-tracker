@@ -491,6 +491,7 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(price_sync.db, "insert_price_snapshot", lambda **kw: inserted.append(kw)),
             mock.patch.object(price_sync.db, "save_card", lambda card: card),
             mock.patch.object(price_sync.db, "update_card_variant_siblings", lambda *a: True),
+            mock.patch.object(price_sync.db, "get_price_snapshots_for_cards", lambda ids: {}),
             mock.patch.object(poketrace, "get_cards_by_tcgplayer_ids", fake_batch),
             mock.patch.object(price_sync, "pull_card_graded_prices", graded_exhausted),
             mock.patch.object(tcggo, "is_configured", lambda: True),
@@ -524,6 +525,7 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(state_store, "set", state.set),
             mock.patch.object(price_sync.db, "get_collection_items", lambda: items),
             mock.patch.object(price_sync.db, "get_card", lambda cid: cards[cid]),
+            mock.patch.object(price_sync.db, "get_price_snapshots_for_cards", lambda ids: {}),
             mock.patch.object(price_sync, "pull_card_graded_prices", track),
             mock.patch.object(tcggo, "requests_remaining", lambda: None),
         ]
@@ -536,6 +538,47 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pulled, [])
         self.assertEqual(record["skipped_variant_ambiguous"], 1)
+
+    async def test_only_unpriced_graded_cards_use_tcggo(self):
+        state = FakeState()
+        items = [
+            {"id": "i1", "card_id": "raw", "ownership_grade": "RAW", "quantity": 1},
+            {"id": "i2", "card_id": "mine", "ownership_grade": "PSA_10", "quantity": 1},
+            {"id": "i3", "card_id": "open", "ownership_grade": "PSA_9", "quantity": 1},
+        ]
+        cards = {cid: card_row(cid, cid, "Holofoil") for cid in ("raw", "mine", "open")}
+        snapshots = {
+            "mine": [snap(61.51, "manual", grade="PSA_10")],
+            # A manual price for a grade you don't own doesn't count.
+            "open": [snap(40.0, "manual", grade="PSA_10")],
+        }
+        pulled = []
+
+        async def track(card):
+            pulled.append(card["id"])
+            return 1
+
+        patches = [
+            mock.patch.object(state_store, "get", state.get),
+            mock.patch.object(state_store, "set", state.set),
+            mock.patch.object(price_sync.db, "get_collection_items", lambda: items),
+            mock.patch.object(price_sync.db, "get_card", lambda cid: cards[cid]),
+            mock.patch.object(
+                price_sync.db, "get_price_snapshots_for_cards",
+                lambda ids: {i: snapshots.get(i, []) for i in ids},
+            ),
+            mock.patch.object(price_sync, "pull_card_graded_prices", track),
+            mock.patch.object(tcggo, "requests_remaining", lambda: None),
+        ]
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        record = price_sync._new_graded_record()
+        await price_sync._pull_graded(record)
+
+        self.assertEqual(pulled, ["open"])
+        self.assertEqual(record["skipped_manual_price"], 1)
 
 
 PRICE_GUIDE = """

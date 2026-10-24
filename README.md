@@ -361,9 +361,12 @@ What a sync does:
   is never used in its place. A card held in several collection rows is
   looked up once.
 - **Graded** (PSA 8–10) prices come from TCGGO's eBay sold medians, only when
-  `RAPIDAPI_KEY` is set. Cards you own graded are pulled first. TCGGO matches
-  on the TCGPlayer product, so cards whose product has several variants
-  (e.g. Holo and Reverse Holo) are skipped without a request.
+  `RAPIDAPI_KEY` is set, and only for cards you own graded whose grade you
+  haven't priced yourself (raw cards and your own prices never need it).
+  TCGGO matches on the TCGPlayer product, so cards whose product has several
+  variants (e.g. Holo and Reverse Holo) are skipped without a request.
+- **Raw prices** cover up to 300 cards per sync (about 15 PokeTrace
+  requests, since 20 cards fit in one).
 - **Quota safety:** both APIs report remaining requests in response headers,
   and the app stores them. A sync stops when PokeTrace is down to 20
   requests, leaving room for searches and new cards. Graded pulls stop
