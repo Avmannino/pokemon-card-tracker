@@ -2490,3 +2490,61 @@ a.manual-source-link:hover {
 .card-zoom .drawn-slab .drawn-slab-label strong {
   font-size: 1.05rem;
 }
+
+/* Mobile pull-to-refresh (PullToRefresh.jsx). The browser's own pull
+   gesture and top bounce are turned off so the app's takes over (Safari on
+   iOS 16+, Chrome). */
+@media (pointer: coarse) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+}
+
+.pull-refresh {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 50%;
+  z-index: 100;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  padding: 8px 14px;
+
+  border: 1px solid #252d3c;
+
+  border-radius: 999px;
+
+  background: #121826;
+
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+
+  color: #e9edf7;
+
+  font-size: 0.8rem;
+  font-weight: 600;
+
+  pointer-events: none;
+}
+
+.pull-refresh-icon {
+  display: inline-block;
+
+  font-size: 1.05rem;
+
+  line-height: 1;
+}
+
+.pull-refresh-icon.spinning {
+  animation: pull-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes pull-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
