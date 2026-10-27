@@ -72,18 +72,11 @@ button:disabled {
 .hero {
   display: grid;
 
-  grid-template-columns:
-    minmax(0, 1fr)
-    340px;
-
-  gap: 28px;
-
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
 
   margin-bottom: 28px;
 }
 
-.hero > div:first-child,
 .portfolio-card,
 .search-panel,
 .collection-panel,
@@ -96,10 +89,6 @@ button:disabled {
   box-shadow:
     0 18px 50px
     rgba(0, 0, 0, 0.28);
-}
-
-.hero > div:first-child {
-  padding: 34px 38px;
 }
 
 .eyebrow {
@@ -144,18 +133,6 @@ h2 {
   font-size: 1.45rem;
 
   letter-spacing: -0.025em;
-}
-
-.hero-copy {
-  max-width: 720px;
-
-  margin-bottom: 0;
-
-  color: #9099aa;
-
-  font-size: 1rem;
-
-  line-height: 1.65;
 }
 
 .portfolio-card {
@@ -2299,7 +2276,6 @@ a.manual-source-link:hover {
     padding-top: 16px;
   }
 
-  .hero > div:first-child,
   .portfolio-card,
   .search-panel,
   .collection-panel,
@@ -2307,7 +2283,6 @@ a.manual-source-link:hover {
     border-radius: 16px;
   }
 
-  .hero > div:first-child,
   .search-panel,
   .collection-panel,
   .dashboard-panel {

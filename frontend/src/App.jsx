@@ -827,16 +827,6 @@ function App() {
   return (
     <main className="app-shell">
       <section className="hero">
-        <div>
-
-          <h1>Pokémon Card Market Dashboard</h1>
-
-          <p className="hero-copy">
-            Track your collection, compare raw and PSA values,
-            and keep market snapshots over time.
-          </p>
-        </div>
-
         <div className="portfolio-card">
           <span>Known collection value</span>
 
