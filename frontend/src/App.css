@@ -260,8 +260,18 @@ h2 {
   color: #596378;
 }
 
-.movers-panel {
+.movers-split {
+  display: grid;
+
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  gap: 16px;
+
   margin-top: 20px;
+}
+
+.movers-panel {
+  min-width: 0;
 
   padding: 22px;
 
@@ -282,18 +292,28 @@ h2 {
   letter-spacing: -0.02em;
 }
 
-.movers-grid {
-  display: grid;
+.movers-panel.winners .eyebrow {
+  color: #5fe3a4;
+}
 
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.movers-panel.losers .eyebrow {
+  color: #f18a8a;
+}
 
-  gap: 12px;
+.movers-list {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 10px;
 }
 
 .mover-entry {
   display: flex;
 
-  flex-direction: column;
+  align-items: center;
+
+  justify-content: space-between;
 
   gap: 12px;
 
@@ -369,39 +389,34 @@ h2 {
   font-weight: 700;
 }
 
-.mover-changes {
+.mover-week {
   display: flex;
 
   flex-direction: column;
 
-  gap: 6px;
+  flex-shrink: 0;
 
-  padding-top: 11px;
+  align-items: flex-end;
 
-  border-top: 1px solid #1c232f;
+  gap: 2px;
+
+  font-variant-numeric: tabular-nums;
 }
 
-.mover-change-row {
-  display: flex;
-
-  gap: 10px;
-
-  align-items: baseline;
-
-  justify-content: space-between;
-
-  font-size: 0.82rem;
+.mover-week strong {
+  font-size: 0.9rem;
 }
 
-.mover-change-label {
-  color: #737f93;
+.mover-week span {
+  font-size: 0.74rem;
+}
 
-  font-size: 0.72rem;
-  font-weight: 800;
+.mover-week.positive {
+  color: #5fe3a4;
+}
 
-  letter-spacing: 0.05em;
-
-  text-transform: uppercase;
+.mover-week.negative {
+  color: #f18a8a;
 }
 
 .change-badge {
@@ -2244,8 +2259,7 @@ a.manual-source-link:hover {
       1fr;
   }
 
-  .performance-row,
-  .movers-grid {
+  .performance-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2290,7 +2304,7 @@ a.manual-source-link:hover {
   }
 
   .performance-row,
-  .movers-grid {
+  .movers-split {
     grid-template-columns: 1fr;
   }
 

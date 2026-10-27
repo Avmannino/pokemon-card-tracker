@@ -62,10 +62,10 @@ POINTS_PER_RANGE = 120
 # collection, not as a market move after it joined.
 ENTRY_SETTLEMENT = timedelta(minutes=60)
 
-# Each biggest-mover entry reports its change over these windows.
-MOVER_CARD_WINDOWS = (("1W", timedelta(days=7)), ("1M", timedelta(days=30)))
+# Biggest winners and losers: the past week, top 5 of each.
+MOVER_WINDOW = timedelta(days=7)
 
-TOP_MOVER_COUNT = 3
+TOP_MOVER_COUNT = 5
 
 
 def parse_ts(value: Any) -> datetime:
@@ -521,54 +521,44 @@ def _event_log(lots: list[Lot]) -> list[dict[str, Any]]:
     return log
 
 
-def _top_movers(lots: list[Lot], now: datetime) -> list[dict[str, Any]]:
-    ranked = []
+def _weekly_movers(lots: list[Lot], now: datetime) -> dict[str, list[dict[str, Any]]]:
+    """The cards that gained and lost the most value over the past week, as
+    {"winners": [...], "losers": [...]}, each ranked by dollar change of the
+    copies you hold. Only the part of the week you've owned a card counts."""
+    moves = []
 
     for lot in lots:
         held = lot.held(now)
         now_price = lot.price(now)
-        if not held or now_price is None:
+        start_price = lot.price(max(now - MOVER_WINDOW, lot.added_at))
+        if not held or now_price is None or start_price is None:
             continue
 
-        changes: dict[str, Any] = {}
-        for label, window in MOVER_CARD_WINDOWS:
-            # Only the part of the window you've owned the card for.
-            since = max(now - window, lot.added_at)
-            start_price = lot.price(since)
-            if start_price is None:
-                continue
+        change = round((now_price - start_price) * held, 2)
+        if change == 0:
+            continue
 
-            changes[label] = {
-                "change": round((now_price - start_price) * held, 2),
+        moves.append(
+            {
+                "card": lot.card,
+                "grade": lot.grade,
+                "quantity": held,
+                "value_each": round(now_price, 2),
+                "current_value": round(now_price * held, 2),
+                "change": change,
                 "change_pct": (
                     round((now_price - start_price) / start_price * 100, 2)
                     if start_price
                     else None
                 ),
             }
-
-        # Ranked by the largest move in either window, so a card that jumped
-        # this week and one that drifted all month both surface.
-        magnitude = max((abs(window["change"]) for window in changes.values()), default=0.0)
-        if magnitude == 0:
-            continue
-
-        ranked.append(
-            (
-                magnitude,
-                {
-                    "card": lot.card,
-                    "grade": lot.grade,
-                    "quantity": held,
-                    "value_each": round(now_price, 2),
-                    "current_value": round(now_price * held, 2),
-                    "changes": changes,
-                },
-            )
         )
 
-    ranked.sort(key=lambda row: row[0], reverse=True)
-    return [row for _, row in ranked[:TOP_MOVER_COUNT]]
+    moves.sort(key=lambda move: move["change"])
+    return {
+        "winners": [move for move in reversed(moves) if move["change"] > 0][:TOP_MOVER_COUNT],
+        "losers": [move for move in moves if move["change"] < 0][:TOP_MOVER_COUNT],
+    }
 
 
 def _top_cards(lots: list[Lot], now: datetime) -> list[dict[str, Any]]:
@@ -620,7 +610,7 @@ def build_dashboard(
     return {
         "current_total_value": round(performance.raw_value(now), 2),
         "ranges": ranges,
-        "top_movers": _top_movers(lots, now),
+        "weekly_movers": _weekly_movers(lots, now),
         "top_cards": _top_cards(lots, now),
         "events": _event_log(lots),
         "tracking": {

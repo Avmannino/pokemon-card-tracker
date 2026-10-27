@@ -25,10 +25,6 @@ const PERFORMANCE_WINDOWS = [
 ];
 
 // Reported on each biggest-mover entry.
-const MOVER_CARD_WINDOWS = [
-  { key: "1W", label: "Week" },
-  { key: "1M", label: "Month" },
-];
 
 function signedMoney(value) {
   if (value === null || value === undefined) {
@@ -650,72 +646,67 @@ function Dashboard({ refreshKey, actions }) {
         </aside>
       </div>
 
-      <section className="movers-panel">
-        <p className="eyebrow">BIGGEST MOVERS</p>
-        <h3>Largest price changes</h3>
+      <div className="movers-split">
+        {[
+          { key: "winners", eyebrow: "BIGGEST WINNERS", empty: "No cards gained value this week." },
+          { key: "losers", eyebrow: "BIGGEST LOSERS", empty: "No cards lost value this week." },
+        ].map(({ key, eyebrow, empty }) => {
+          const movers = data.weekly_movers?.[key] || [];
 
-        {(data.top_movers || []).length === 0 ? (
-          <div className="empty-state small">
-            Not enough price history yet.
-          </div>
-        ) : (
-          <div className="movers-grid">
-            {data.top_movers.map((mover, index) => (
-              <article
-                className="mover-entry"
-                key={`${mover.card.id}-${index}`}
-              >
-                <div className="mover-identity">
-                  {mover.card.image_url && (
-                    <img
-                      className="thumb-clickable"
-                      src={mover.card.image_url}
-                      alt={cardTitle(mover.card)}
-                      onClick={() =>
-                        openZoom(mover.card, {
-                          grade: mover.grade,
-                          valueEach: mover.value_each,
-                        })
-                      }
-                    />
-                  )}
+          return (
+            <section className={`movers-panel ${key}`} key={key}>
+              <p className="eyebrow">{eyebrow}</p>
+              <h3>This week</h3>
 
-                  <div>
-                    <strong>{cardTitle(mover.card)}</strong>
-                    <span>{mover.card.set_name || "Unknown set"}</span>
-                    <span className="mover-value">
-                      {money(mover.current_value)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mover-changes">
-                  {MOVER_CARD_WINDOWS.map(({ key, label }) => {
-                    const change = mover.changes?.[key];
-                    const tone =
-                      change && change.change >= 0 ? "positive" : "negative";
-
-                    return (
-                      <div className="mover-change-row" key={key}>
-                        <span className="mover-change-label">{label}</span>
-
-                        {change ? (
-                          <span className={tone}>
-                            <strong>{signedMoney(change.change)}</strong>{" "}
-                            {percent(change.change_pct)}
-                          </span>
-                        ) : (
-                          <span className="muted">—</span>
+              {movers.length === 0 ? (
+                <div className="empty-state small">{empty}</div>
+              ) : (
+                <div className="movers-list">
+                  {movers.map((mover, index) => (
+                    <article
+                      className="mover-entry"
+                      key={`${mover.card.id}-${mover.grade}-${index}`}
+                    >
+                      <div className="mover-identity">
+                        {mover.card.image_url && (
+                          <img
+                            className="thumb-clickable"
+                            src={mover.card.image_url}
+                            alt={cardTitle(mover.card)}
+                            onClick={() =>
+                              openZoom(mover.card, {
+                                grade: mover.grade,
+                                valueEach: mover.value_each,
+                              })
+                            }
+                          />
                         )}
+
+                        <div>
+                          <strong>{cardTitle(mover.card)}</strong>
+                          <span>{mover.card.set_name || "Unknown set"}</span>
+                          <span className="mover-value">
+                            {money(mover.current_value)}
+                          </span>
+                        </div>
                       </div>
-                    );
-                  })}
+
+                      <div
+                        className={`mover-week ${
+                          mover.change >= 0 ? "positive" : "negative"
+                        }`}
+                      >
+                        <strong>{signedMoney(mover.change)}</strong>
+                        <span>{percent(mover.change_pct)}</span>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
       <CardZoomModal card={zoomedCard} onClose={closeZoom} />
     </section>
