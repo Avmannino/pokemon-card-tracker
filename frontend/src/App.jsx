@@ -50,6 +50,10 @@ function refreshStatusText(status) {
   if (status.syncing && status.progress) {
     const { kind, phase, done, total } = status.progress;
 
+    if (phase === "finishing") {
+      return "Updating your collection…";
+    }
+
     if (kind === "graded_refresh") {
       return `Refreshing graded cards… ${done}/${total}`;
     }

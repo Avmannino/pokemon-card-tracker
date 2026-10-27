@@ -87,6 +87,42 @@ def save_card(card: dict[str, Any]) -> dict[str, Any]:
     return response.data[0]
 
 
+def refresh_saved_cards(updates: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]]) -> None:
+    """Catalog details for many saved cards in one request: each update is
+    (saved card row, fresh normalized details, variant siblings or None).
+    Like save_card, extra marketplace_urls keys (e.g. tcggo_id) are kept,
+    and siblings left as they were when None."""
+    if not updates:
+        return
+
+    now = utc_now_iso()
+    payload = [
+        {
+            "poketrace_id": saved["poketrace_id"],
+            "name": fresh["name"],
+            "card_number": fresh.get("card_number"),
+            "set_name": fresh.get("set_name"),
+            "set_slug": fresh.get("set_slug"),
+            "variant": fresh.get("variant"),
+            "rarity": fresh.get("rarity"),
+            "image_url": fresh.get("image_url"),
+            "tcgplayer_id": fresh.get("tcgplayer_id"),
+            "marketplace_urls": {
+                **(saved.get("marketplace_urls") or {}),
+                **(fresh.get("marketplace_urls") or {}),
+            },
+            "variant_siblings": siblings if siblings is not None else saved.get("variant_siblings"),
+            "updated_at": now,
+        }
+        for saved, fresh, siblings in updates
+    ]
+
+    for start in range(0, len(payload), 500):
+        _client().table("cards").upsert(
+            payload[start:start + 500], on_conflict="poketrace_id"
+        ).execute()
+
+
 def update_marketplace_urls(card_id: str, extra: dict[str, Any]) -> None:
     """Merge `extra` into a card's marketplace_urls (used to remember the
     TCGGO id so a sleeping/redeployed backend never has to look it up again)."""
@@ -223,21 +259,51 @@ def get_cards(card_ids) -> dict[str, dict[str, Any]]:
     return {row["id"]: row for row in rows}
 
 
+# Set once the price_changes view turns out not to exist yet, so reads
+# stop trying it until the backend restarts.
+_price_changes_missing = False
+
+
 def get_price_snapshots_for_cards(card_ids) -> dict[str, list[dict[str, Any]]]:
-    """All price snapshots (oldest first) for each card - no row cap, since
-    the performance history needs every price observation, not the latest."""
+    """Each card's price history (oldest first) - no row cap, since the
+    performance history needs every price change, not just the latest.
+
+    Read from the price_changes view, which leaves out rows that only
+    repeat the price before them (the history is identical, at about a
+    quarter of the rows). Falls back to every row until
+    supabase/migrations/2026-10-27_price_changes_view.sql is run."""
+    global _price_changes_missing
+
     ids = list(card_ids)
     result: dict[str, list[dict[str, Any]]] = {card_id: [] for card_id in ids}
     if not ids:
         return result
 
-    rows = _fetch_all(
-        lambda: _client().table("price_snapshots")
-        .select("*")
-        .in_("card_id", ids)
-        .order("observed_at")
-        .order("id")
-    )
+    def query(table: str):
+        return lambda: (
+            _client().table(table)
+            .select("*")
+            .in_("card_id", ids)
+            .order("observed_at")
+            .order("id")
+        )
+
+    rows = None
+    if not _price_changes_missing:
+        try:
+            rows = _fetch_all(query("price_changes"))
+        except Exception as exc:
+            if "price_changes" not in str(exc) and "PGRST205" not in str(exc):
+                raise
+            _price_changes_missing = True
+            logging.getLogger("db").warning(
+                "price_changes view doesn't exist yet; run "
+                "supabase/migrations/2026-10-27_price_changes_view.sql"
+            )
+
+    if rows is None:
+        rows = _fetch_all(query("price_snapshots"))
+
     for row in rows:
         result.setdefault(row["card_id"], []).append(row)
 
@@ -321,6 +387,27 @@ def insert_price_snapshot(
     }
     response = _client().table("price_snapshots").insert(payload).execute()
     return response.data[0]
+
+
+def insert_price_snapshots(rows: list[dict[str, Any]]) -> None:
+    """Many snapshots in one request per 500 (a sync's worth), instead of a
+    request each. Rows take insert_price_snapshot's arguments."""
+    now = utc_now_iso()
+    payload = [
+        {
+            "card_id": row["card_id"],
+            "grade": row["grade"],
+            "source": row["source"],
+            "value": row["value"],
+            "source_url": row.get("source_url"),
+            "observed_at": row.get("observed_at") or now,
+            "metadata": row.get("metadata") or {},
+        }
+        for row in rows
+    ]
+
+    for start in range(0, len(payload), 500):
+        _client().table("price_snapshots").insert(payload[start:start + 500]).execute()
 
 
 def get_price_snapshots(card_id: str, limit: int = 500) -> list[dict[str, Any]]:

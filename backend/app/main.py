@@ -1,14 +1,16 @@
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from . import db
+from . import cache, db
 from .config import settings
 from .schemas import (
     AddCollectionRequest,
@@ -49,6 +51,16 @@ app.add_middleware(
 
 # The dashboard returns a chart series per range; compress it.
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def clear_cache_after_changes(request: Request, call_next):
+    """Any write (adding, removing, editing cards or prices) makes the cached
+    collection and dashboard out of date."""
+    response = await call_next(request)
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        cache.invalidate()
+    return response
 
 
 def _variant_info(item: dict[str, Any], card: dict[str, Any]) -> dict[str, Any]:
@@ -138,21 +150,46 @@ async def search(
     return {"results": cards}
 
 
-@app.get("/api/collection")
-def list_collection() -> dict[str, Any]:
-    """Reads saved data only - never calls a pricing API."""
+def _load_collection_data() -> dict[str, Any]:
+    """Everything the collection and dashboard are built from, read once
+    for both."""
     items = db.get_collection_items()
-    card_ids = {item["card_id"] for item in items}
-    cards = db.get_cards(card_ids)
-    snapshots = db.get_price_snapshots_for_cards(card_ids)
+
+    events_recorded = True
+    try:
+        events = db.get_collection_events()
+    except Exception:
+        # Table not created yet: current cards still chart from when each was
+        # added, but nothing removed can be accounted for.
+        logger.warning(
+            "collection_events unavailable; run supabase/schema.sql",
+            exc_info=True,
+        )
+        events = []
+        events_recorded = False
+
+    card_ids = {item["card_id"] for item in items} | {
+        event["card_id"] for event in events
+    }
+
+    return {
+        "items": items,
+        "events": events,
+        "events_recorded": events_recorded,
+        "cards": db.get_cards(card_ids),
+        "snapshots": db.get_price_snapshots_for_cards(card_ids),
+    }
+
+
+def _build_collection(data: dict[str, Any]) -> dict[str, Any]:
     serialized = []
 
-    for item in items:
-        card = cards.get(item["card_id"])
+    for item in data["items"]:
+        card = data["cards"].get(item["card_id"])
         if card:
             serialized.append(
                 serialize_collection_item(
-                    item, card, list(reversed(snapshots.get(card["id"], [])))
+                    item, card, list(reversed(data["snapshots"].get(card["id"], [])))
                 )
             )
 
@@ -176,34 +213,45 @@ def list_collection() -> dict[str, Any]:
     }
 
 
-@app.get("/api/portfolio/dashboard")
-def portfolio_dashboard() -> dict[str, Any]:
-    items = db.get_collection_items()
+def _build_responses() -> dict[str, bytes]:
+    """The collection and dashboard, as ready-to-send JSON (see cache.py)."""
+    data = _load_collection_data()
+    dashboard = build_dashboard(
+        items=data["items"],
+        events=data["events"],
+        cards=data["cards"],
+        snapshots_by_card=data["snapshots"],
+        events_recorded=data["events_recorded"],
+    )
 
-    events_recorded = True
-    try:
-        events = db.get_collection_events()
-    except Exception:
-        # Table not created yet: current cards still chart from when each was
-        # added, but nothing removed can be accounted for.
-        logger.warning(
-            "collection_events unavailable; run supabase/schema.sql",
-            exc_info=True,
-        )
-        events = []
-        events_recorded = False
-
-    card_ids = {item["card_id"] for item in items} | {
-        event["card_id"] for event in events
+    return {
+        "collection": _json_bytes(_build_collection(data)),
+        "dashboard": _json_bytes(dashboard),
     }
 
-    return build_dashboard(
-        items=items,
-        events=events,
-        cards=db.get_cards(card_ids),
-        snapshots_by_card=db.get_price_snapshots_for_cards(card_ids),
-        events_recorded=events_recorded,
-    )
+
+def _json_bytes(value: Any) -> bytes:
+    # As FastAPI's own JSON responses: compact, UTF-8, never NaN.
+    return json.dumps(
+        jsonable_encoder(value),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+cache.register(_build_responses)
+
+
+@app.get("/api/collection")
+def list_collection() -> Response:
+    """Reads saved data only - never calls a pricing API."""
+    return Response(cache.get()["collection"], media_type="application/json")
+
+
+@app.get("/api/portfolio/dashboard")
+def portfolio_dashboard() -> Response:
+    return Response(cache.get()["dashboard"], media_type="application/json")
 
 
 def _record_add_event(item: dict[str, Any]) -> None:

@@ -202,8 +202,14 @@ class RawPull(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(price_sync.db, "get_collection_items", lambda: list(self.items)),
             mock.patch.object(price_sync.db, "get_cards", lambda ids: {i: self.cards[i] for i in ids if i in self.cards}),
             mock.patch.object(price_sync.db, "insert_price_snapshot", lambda **kw: self.inserted.append(kw)),
+            mock.patch.object(price_sync.db, "insert_price_snapshots", lambda rows: self.inserted.extend(rows)),
             mock.patch.object(price_sync.db, "save_card", lambda card: card),
-            mock.patch.object(price_sync.db, "update_card_variant_siblings", lambda cid, s: self.siblings_saved.__setitem__(cid, s)),
+            mock.patch.object(
+                price_sync.db, "refresh_saved_cards",
+                lambda updates: self.siblings_saved.update(
+                    {card["id"]: s for card, _, s in updates if s is not None}
+                ),
+            ),
             mock.patch.object(poketrace, "get_cards_by_tcgplayer_ids", fake_batch),
             mock.patch.object(poketrace, "get_card", fake_single),
         ]
@@ -488,9 +494,8 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(price_sync.db, "get_collection_items", lambda: items),
             mock.patch.object(price_sync.db, "get_cards", lambda ids: {i: cards[i] for i in ids}),
             mock.patch.object(price_sync.db, "get_card", lambda cid: cards[cid]),
-            mock.patch.object(price_sync.db, "insert_price_snapshot", lambda **kw: inserted.append(kw)),
-            mock.patch.object(price_sync.db, "save_card", lambda card: card),
-            mock.patch.object(price_sync.db, "update_card_variant_siblings", lambda *a: True),
+            mock.patch.object(price_sync.db, "insert_price_snapshots", lambda rows: inserted.extend(rows)),
+            mock.patch.object(price_sync.db, "refresh_saved_cards", lambda updates: None),
             mock.patch.object(price_sync.db, "get_price_snapshots_for_cards", lambda ids: {}),
             mock.patch.object(poketrace, "get_cards_by_tcgplayer_ids", fake_batch),
             mock.patch.object(price_sync, "pull_card_graded_prices", graded_exhausted),

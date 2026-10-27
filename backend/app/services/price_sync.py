@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .. import db
+from .. import cache, db
 from ..config import settings
 from . import poketrace, pricecharting, state_store, tcggo
 from .valuation import is_manual_entry, is_variant_ambiguous, latest_by_source
@@ -104,6 +104,23 @@ def _read_state() -> dict[str, Any] | None:
 
 def _write_state(state: dict[str, Any]) -> None:
     state_store.set("price_sync", state)
+
+
+def _raw_snapshot_rows(card: dict[str, Any], remote: dict[str, Any]) -> list[dict[str, Any]]:
+    """The Near Mint snapshots to save for `card` from `remote` (already
+    matched exactly), as insert_price_snapshot arguments."""
+    return [
+        {
+            "card_id": card["id"],
+            "grade": "RAW",
+            "source": raw_source["source"],
+            "value": raw_source["value"],
+            "source_url": raw_source.get("source_url"),
+            "observed_at": raw_source.get("observed_at"),
+            "metadata": raw_source.get("metadata"),
+        }
+        for raw_source in poketrace.extract_raw_sources(remote)
+    ]
 
 
 def store_raw_prices(card: dict[str, Any], remote: dict[str, Any]) -> int:
@@ -256,6 +273,36 @@ async def _pull_raw(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
     siblings_by_card: dict[str, dict[str, Any]] = {}
     done = 0
 
+    # Matched cards wait here and are saved a batch at a time (one request
+    # for their prices, one for their catalog details) rather than a few
+    # requests per card.
+    pending_rows: list[dict[str, Any]] = []
+    pending_cards: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]] = []
+
+    def flush() -> None:
+        rows, updates = list(pending_rows), list(pending_cards)
+        pending_rows.clear()
+        pending_cards.clear()
+        if not updates:
+            return
+
+        try:
+            db.insert_price_snapshots(rows)
+        except Exception as exc:
+            logger.exception("Saving synced prices failed")
+            record["failed"] += len(updates)
+            for card, _, _ in updates:
+                _note(record, card, f"Saving failed: {exc}")
+            return
+
+        record["succeeded"] += len(updates)
+
+        try:
+            db.refresh_saved_cards(updates)
+        except Exception:
+            # Prices are saved; only names/images/variants missed a refresh.
+            logger.exception("Refreshing card details failed")
+
     async def handle(card: dict[str, Any], remote_cards: list[dict[str, Any]]) -> None:
         nonlocal done
         record["attempted"] += 1
@@ -274,15 +321,14 @@ async def _pull_raw(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 record["failed"] += 1
                 _note(record, card, problem)
             else:
-                store_raw_prices(card, remote)
-                record["succeeded"] += 1
-
                 siblings = poketrace.variant_siblings(
                     poketrace.saved_printing_key(card), remote_cards or [remote]
                 )
                 if siblings is not None:
                     siblings_by_card[card["id"]] = siblings
-                    db.update_card_variant_siblings(card["id"], siblings)
+
+                pending_rows.extend(_raw_snapshot_rows(card, remote))
+                pending_cards.append((card, poketrace.normalize_card(remote), siblings))
         except poketrace.PokeTraceRateLimited:
             raise
         except Exception as exc:
@@ -319,10 +365,14 @@ async def _pull_raw(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 for card in by_printing[key]:
                     await handle(card, remote_cards)
 
+            flush()
+
         for card in singles:
             await handle(card, [])
     except poketrace.PokeTraceRateLimited as exc:
         record["stopped_early"] = str(exc)
+    finally:
+        flush()
 
     return siblings_by_card
 
@@ -598,6 +648,16 @@ async def run_scheduler() -> None:
         await asyncio.sleep(max(wait, 0) + 1)
 
 
+async def _rebuild_cache() -> None:
+    """Rebuilds the collection and dashboard right away, so the page reload
+    after a sync (and the first visit after a scheduled one) is instant."""
+    _progress.update(phase="finishing")
+    try:
+        await asyncio.to_thread(cache.rebuild)
+    except Exception:
+        logger.exception("Rebuilding the cached collection failed")
+
+
 def _manual_cooldown_remaining() -> int:
     manual = (_read_state() or {}).get("manual")
     if not manual:
@@ -663,6 +723,8 @@ async def _manual_sync() -> None:
             state["manual"] = record
             _write_state(state)
 
+            await _rebuild_cache()
+
             logger.info(
                 "Manual sync finished: raw %s/%s, graded %s with data",
                 record["raw"]["succeeded"],
@@ -716,6 +778,8 @@ async def _graded_refresh() -> None:
             state = _read_state() or {}
             state["pricecharting"] = record
             _write_state(state)
+
+            await _rebuild_cache()
 
             logger.info(
                 "Graded card refresh finished: %s of %s updated",

@@ -129,6 +129,10 @@ class ApiTestCase(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+        # Built responses are kept between requests; each test starts clean.
+        main.cache.invalidate()
+        self.addCleanup(main.cache.invalidate)
+
         self.client = TestClient(main.app)
 
     def own_reverse_holo_gengar(self, grade="RAW"):

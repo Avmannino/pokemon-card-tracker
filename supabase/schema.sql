@@ -126,3 +126,29 @@ alter table public.collection_items
 -- Slab photos (also in supabase/migrations/2026-10-17_slab_images.sql).
 alter table public.collection_items
     add column if not exists psa_cert_number text;
+
+-- Price history without repeated prices (also in
+-- supabase/migrations/2026-10-27_price_changes_view.sql).
+create index if not exists idx_price_snapshots_series
+    on public.price_snapshots(card_id, grade, source, observed_at, id);
+
+create or replace view public.price_changes
+with (security_invoker = true) as
+select id, card_id, grade, source, value, source_url, observed_at, metadata, created_at
+from (
+    select
+        s.*,
+        lag(s.value) over (
+            partition by s.card_id, s.grade, s.source
+            order by s.observed_at, s.id
+        ) as previous_value,
+        row_number() over (
+            partition by s.card_id, s.grade, s.source
+            order by s.observed_at desc, s.id desc
+        ) as newest_first
+    from public.price_snapshots s
+) history
+where previous_value is distinct from value
+   or newest_first = 1;
+
+revoke all on public.price_changes from anon, authenticated;

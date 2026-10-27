@@ -526,13 +526,15 @@ def build_market_values(
             "divergent": valuation["divergent"],
             "components": valuation["components"],
             "last_updated": last_updated,
+            # Only what the page uses (the PSA form prefills from your manual
+            # entries); the full metadata stays out of the response.
             "sources": [
                 {
                     "source": row.get("source"),
                     "value": _as_float(row.get("value")),
                     "source_url": row.get("source_url"),
                     "observed_at": row.get("observed_at"),
-                    "metadata": row.get("metadata") or {},
+                    "metadata": {"entry_method": _meta(row).get("entry_method")},
                 }
                 for row in sources
             ],
