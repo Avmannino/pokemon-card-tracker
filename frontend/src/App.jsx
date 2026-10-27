@@ -27,6 +27,12 @@ import {
 const GRADES = ["RAW", "PSA_8", "PSA_9", "PSA_10"];
 const SEARCH_PAGE_SIZE = 10;
 
+// Search as you type: each new search is a PokeTrace request (250 a day),
+// so it waits for a pause in typing and a few letters.
+const SUGGEST_MIN_CHARS = 3;
+const SUGGEST_DELAY_MS = 500;
+const SUGGEST_LIMIT = 8;
+
 function pullTime(iso) {
   return new Date(iso).toLocaleString("en-US", {
     month: "short",
@@ -307,6 +313,13 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchPage, setSearchPage] = useState(0);
   const [searching, setSearching] = useState(false);
+  // Search-as-you-type: null (nothing to show), "loading", "error" or the
+  // results for the current text.
+  const [suggestions, setSuggestions] = useState(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(-1);
+  const searchCache = useRef(new Map());
+  const latestSuggestQuery = useRef("");
   const [loadingCollection, setLoadingCollection] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -496,6 +509,91 @@ function App() {
   const totalSearchPages = Math.max(searchPages.length, 1);
   const currentSearchPage = Math.min(searchPage, totalSearchPages - 1);
 
+  // Each search is a PokeTrace request, so a query is fetched once per page
+  // load however often it's typed.
+  async function cachedSearch(text) {
+    const key = text.toLowerCase();
+
+    if (!searchCache.current.has(key)) {
+      const data = await searchCards(text);
+      searchCache.current.set(key, data.results || []);
+    }
+
+    return searchCache.current.get(key);
+  }
+
+  // Search as you type: once typing pauses, the matches drop down under
+  // the box.
+  useEffect(() => {
+    const text = query.trim();
+    latestSuggestQuery.current = text;
+    setHighlighted(-1);
+
+    if (text.length < SUGGEST_MIN_CHARS) {
+      setSuggestions(null);
+      return undefined;
+    }
+
+    const cached = searchCache.current.get(text.toLowerCase());
+    if (cached) {
+      setSuggestions(cached);
+      return undefined;
+    }
+
+    setSuggestions("loading");
+
+    const timer = setTimeout(async () => {
+      let results;
+      try {
+        results = await cachedSearch(text);
+      } catch {
+        results = "error";
+      }
+
+      if (latestSuggestQuery.current === text) {
+        setSuggestions(results);
+      }
+    }, SUGGEST_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const suggestionList = Array.isArray(suggestions)
+    ? suggestions.slice(0, SUGGEST_LIMIT)
+    : [];
+
+  // Opens the Add form for a dropdown match. Its full results stand in as
+  // the search, so the form knows which other variants it could be.
+  function pickSuggestion(card) {
+    setSuggestOpen(false);
+    setSearchResults(Array.isArray(suggestions) ? suggestions : [card]);
+    setSearchPage(0);
+    setAddForm(emptyAddForm(card));
+  }
+
+  function handleSearchKeyDown(event) {
+    if (event.key === "Escape") {
+      setSuggestOpen(false);
+      return;
+    }
+
+    if (!suggestionList.length) {
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setSuggestOpen(true);
+      setHighlighted((current) => {
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        return (current + step + suggestionList.length) % suggestionList.length;
+      });
+    } else if (event.key === "Enter" && suggestOpen && highlighted >= 0) {
+      event.preventDefault();
+      pickSuggestion(suggestionList[highlighted]);
+    }
+  }
+
   async function handleSearch(event) {
     event.preventDefault();
 
@@ -503,16 +601,17 @@ function App() {
       return;
     }
 
+    setSuggestOpen(false);
     setSearching(true);
     setError("");
     setMessage("");
 
     try {
-      const data = await searchCards(query.trim());
-      setSearchResults(data.results || []);
+      const results = await cachedSearch(query.trim());
+      setSearchResults(results);
       setSearchPage(0);
 
-      if ((data.results || []).length === 0) {
+      if (results.length === 0) {
         setMessage("No cards matched that search.");
       }
     } catch (err) {
@@ -788,14 +887,89 @@ function App() {
           className="search-form"
           onSubmit={handleSearch}
         >
-          <input
-            ref={searchInputRef}
-            value={query}
-            onChange={(event) =>
-              setQuery(event.target.value)
-            }
-            placeholder="Try: Glaceon GX, Charizard ex, Pikachu..."
-          />
+          <div className="search-input-wrap">
+            <input
+              ref={searchInputRef}
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSuggestOpen(true);
+              }}
+              onFocus={() => setSuggestOpen(true)}
+              onBlur={() => setSuggestOpen(false)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Try: Glaceon GX, Charizard ex, Pikachu..."
+              role="combobox"
+              aria-expanded={suggestOpen && suggestions !== null}
+              aria-controls="search-suggestions"
+              autoComplete="off"
+            />
+
+            {suggestOpen && suggestions !== null && (
+              <div
+                id="search-suggestions"
+                className="search-suggestions"
+                role="listbox"
+                // Keeps focus in the box, so choosing a match doesn't close
+                // the list before the choice registers.
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                {suggestions === "loading" && (
+                  <div className="search-suggestion-note">Searching…</div>
+                )}
+
+                {suggestions === "error" && (
+                  <div className="search-suggestion-note">
+                    Search isn't available right now. Press Search to try again.
+                  </div>
+                )}
+
+                {Array.isArray(suggestions) && suggestions.length === 0 && (
+                  <div className="search-suggestion-note">No matching cards.</div>
+                )}
+
+                {suggestionList.map((card, index) => (
+                  <button
+                    type="button"
+                    key={card.poketrace_id}
+                    role="option"
+                    aria-selected={index === highlighted}
+                    className={`search-suggestion ${
+                      index === highlighted ? "highlighted" : ""
+                    }`}
+                    onMouseEnter={() => setHighlighted(index)}
+                    onClick={() => pickSuggestion(card)}
+                  >
+                    {card.image_url ? (
+                      <img src={card.image_url} alt="" loading="lazy" />
+                    ) : (
+                      <span className="search-suggestion-thumb" />
+                    )}
+
+                    <span className="search-suggestion-copy">
+                      <strong>{cardTitle(card)}</strong>
+                      <span>
+                        {card.set_name || "Unknown set"}
+                        {variantLabel(card.variant)
+                          ? ` · ${variantLabel(card.variant)}`
+                          : ""}
+                      </span>
+                    </span>
+
+                    <span className="search-suggestion-price">
+                      {money(card.raw_market_estimate)}
+                    </span>
+                  </button>
+                ))}
+
+                {suggestionList.length > 0 && (
+                  <div className="search-suggestion-note">
+                    Press Search for all {suggestions.length} results.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <button
             type="submit"

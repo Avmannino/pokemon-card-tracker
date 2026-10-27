@@ -1,4 +1,5 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -109,14 +110,30 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Each search is a PokeTrace request, and search-as-you-type repeats queries
+# (backspacing, searching again), so results are reused for an hour.
+SEARCH_CACHE_SECONDS = 3600
+SEARCH_CACHE_SIZE = 500
+_search_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
 @app.get("/api/search")
 async def search(
     q: str = Query(min_length=2, max_length=100),
 ) -> dict[str, Any]:
+    key = " ".join(q.lower().split())
+    cached = _search_cache.get(key)
+    if cached and time.monotonic() - cached[0] < SEARCH_CACHE_SECONDS:
+        return {"results": cached[1]}
+
     try:
-        cards = await poketrace.search_cards(q, limit=20)
+        cards = await poketrace.search_cards(q.strip(), limit=20)
     except poketrace.PokeTraceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if len(_search_cache) >= SEARCH_CACHE_SIZE:
+        _search_cache.pop(min(_search_cache, key=lambda k: _search_cache[k][0]))
+    _search_cache[key] = (time.monotonic(), cards)
 
     return {"results": cards}
 
