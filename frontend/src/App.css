@@ -201,6 +201,16 @@ h2 {
 }
 
 .dashboard-heading {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  gap: 14px 24px;
+
   margin-bottom: 20px;
 }
 
@@ -789,6 +799,56 @@ h2 {
   background: #1b2230;
 
   color: #dfe7fb;
+}
+
+/* The sync buttons at the top right of the dashboard. They shrink with the
+   screen via clamp(). */
+.sync-button {
+  padding:
+    clamp(9px, 0.4vw + 7px, 13px)
+    clamp(14px, 0.9vw + 10px, 22px);
+
+  border: 1px solid #3d4b66;
+
+  border-radius: 12px;
+
+  background: #1b2433;
+
+  color: #e9efff;
+
+  font-size: clamp(0.84rem, 0.2vw + 0.8rem, 0.98rem);
+  font-weight: 700;
+
+  white-space: nowrap;
+
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.sync-button:hover:not(:disabled) {
+  border-color: #5f82dc;
+
+  background: #222d42;
+
+  transform: translateY(-1px);
+}
+
+.sync-button.primary {
+  border-color: #4a78e6;
+
+  background: #3567d8;
+
+  color: #ffffff;
+
+  box-shadow: 0 8px 22px rgba(53, 103, 216, 0.35);
+}
+
+.sync-button.primary:hover:not(:disabled) {
+  background: #4274e6;
 }
 
 .refresh-control {
@@ -2273,12 +2333,20 @@ a.manual-source-link:hover {
       column;
   }
 
-  .refresh-control {
-    align-items: flex-start;
+  .dashboard-heading .refresh-control {
+    width: 100%;
+
+    align-items: stretch;
   }
 
   .refresh-buttons {
-    justify-content: flex-start;
+    display: grid;
+
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sync-button {
+    white-space: normal;
   }
 
   .collection-gallery {

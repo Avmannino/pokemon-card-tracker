@@ -848,20 +848,14 @@ function App() {
         </div>
       </section>
 
-      <Dashboard refreshKey={dashboardVersion} />
-
-      <section className="search-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">ADD A CARD</p>
-            <h2>Search Pokémon cards</h2>
-          </div>
-
+      <Dashboard
+        refreshKey={dashboardVersion}
+        actions={
           <div className="refresh-control">
             <div className="refresh-buttons">
               <button
                 type="button"
-                className="secondary-button"
+                className="sync-button primary"
                 onClick={handleSyncNow}
                 disabled={syncing}
               >
@@ -870,7 +864,7 @@ function App() {
 
               <button
                 type="button"
-                className="secondary-button"
+                className="sync-button"
                 onClick={handleGradedRefresh}
                 disabled={syncing}
               >
@@ -881,6 +875,16 @@ function App() {
             <small>{refreshStatusText(refreshStatus)}</small>
             <small>{gradedRefreshText(refreshStatus)}</small>
           </div>
+        }
+      />
+
+      <section className="search-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">ADD A CARD</p>
+            <h2>Search Pokémon cards</h2>
+          </div>
+
         </div>
 
         <form

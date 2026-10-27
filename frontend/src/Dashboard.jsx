@@ -417,7 +417,22 @@ function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
   );
 }
 
-function Dashboard({ refreshKey }) {
+function DashboardHeading({ actions }) {
+  return (
+    <div className="dashboard-heading">
+      <div>
+        <p className="eyebrow">DASHBOARD</p>
+        <h2>Portfolio performance</h2>
+      </div>
+
+      {actions}
+    </div>
+  );
+}
+
+// `actions` (the sync buttons) sit at the top right of every state of the
+// panel, so they're reachable even while it loads or fails.
+function Dashboard({ refreshKey, actions }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -465,6 +480,8 @@ function Dashboard({ refreshKey }) {
   if (loading) {
     return (
       <section className="dashboard-panel">
+        <DashboardHeading actions={actions} />
+
         <div className="empty-state">Loading dashboard…</div>
       </section>
     );
@@ -473,6 +490,8 @@ function Dashboard({ refreshKey }) {
   if (error) {
     return (
       <section className="dashboard-panel">
+        <DashboardHeading actions={actions} />
+
         <div className="status error">{error}</div>
       </section>
     );
@@ -481,10 +500,7 @@ function Dashboard({ refreshKey }) {
   if (!data?.ranges?.ALL?.points?.length) {
     return (
       <section className="dashboard-panel">
-        <div className="dashboard-heading">
-          <p className="eyebrow">DASHBOARD</p>
-          <h2>Portfolio performance</h2>
-        </div>
+        <DashboardHeading actions={actions} />
 
         <div className="empty-state">
           Add cards and refresh prices to start tracking value over time.
@@ -498,10 +514,7 @@ function Dashboard({ refreshKey }) {
 
   return (
     <section className="dashboard-panel">
-      <div className="dashboard-heading">
-        <p className="eyebrow">DASHBOARD</p>
-        <h2>Portfolio performance</h2>
-      </div>
+      <DashboardHeading actions={actions} />
 
       <div className="performance-row">
         {PERFORMANCE_WINDOWS.map(({ key, label }) => {
