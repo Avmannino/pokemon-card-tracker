@@ -188,6 +188,23 @@ function nearestIndex(times, target) {
 function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
   const wrapRef = useRef(null);
   const { width, height } = useElementSize(wrapRef);
+
+  // A point picked by touch stays put; tapping anywhere off the chart
+  // clears it.
+  useEffect(() => {
+    if (hoveredIndex === null) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (wrapRef.current && !wrapRef.current.contains(event.target)) {
+        onHover(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [hoveredIndex, onHover]);
   const ready = width > 0 && height > 0 && points.length > 0;
 
   const values = points.map((point) => point.value);
@@ -280,8 +297,10 @@ function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
               onHover(pointerToIndex(event));
             }
           }}
-          onPointerLeave={() => onHover(null)}
-          onPointerUp={(event) => event.pointerType !== "mouse" && onHover(null)}
+          // Touch: the point stays where you lift your finger, until you tap
+          // elsewhere on the chart or anywhere off it.
+          onPointerLeave={(event) => event.pointerType === "mouse" && onHover(null)}
+          // A cancelled touch is the page scrolling, not a tap.
           onPointerCancel={() => onHover(null)}
           onKeyDown={handleKeyDown}
           onBlur={() => onHover(null)}
