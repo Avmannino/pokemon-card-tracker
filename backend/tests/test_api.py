@@ -231,7 +231,7 @@ class CollectionEndpoint(ApiTestCase):
 
         self.assertEqual(response.status_code, 200)
         row = response.json()["items"][0]
-        self.assertEqual(set(row["owned_grade_changes"]), {"1D", "1W", "1M"})
+        self.assertEqual(set(row["owned_grade_changes"]), {"1D", "1W", "1M", "ADDED"})
         self.assertEqual(row["owned_grade_changes"]["1W"]["grade"], "PSA_9")
         self.assertNotIn("week_change", row)
         self.assertTrue(row["variant_info"]["needs_confirmation"])

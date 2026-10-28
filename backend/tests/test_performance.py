@@ -299,6 +299,47 @@ class DashboardShape(unittest.TestCase):
         }
         self.assertTrue(steps <= {0.0, 50.0, -75.0}, steps)
 
+    def test_last_sync_lists_only_cards_it_changed(self):
+        def saved(value, observed, created, manual=False):
+            return {**snap(value, observed, manual=manual), "created_at": at(created).isoformat()}
+
+        items = [
+            {"id": f"i{n}", "card_id": f"c{n}", "ownership_grade": "RAW",
+             "quantity": 2 if n == 1 else 1, "created_at": at(0).isoformat()}
+            for n in (1, 2, 3, 4)
+        ]
+        cards = {f"c{n}": {"id": f"c{n}", "name": f"c{n}"} for n in (1, 2, 3, 4)}
+        snapshots = {
+            # Raised by the sync (10h-11h), though PokeTrace last updated it
+            # at 9h.
+            "c1": [saved(100, 0, 0), saved(110, 9, 10.5)],
+            # Re-saved at the same price.
+            "c2": [saved(50, 0, 0), saved(50, 10.5, 10.5)],
+            # Lowered by the sync.
+            "c3": [saved(30, 0, 0), saved(27, 10.5, 10.5)],
+            # Changed by hand after the sync, not by it.
+            "c4": [saved(40, 0, 0), saved(45, 12, 12, manual=True)],
+        }
+        last_sync = {
+            "kind": "prices",
+            "started_at": at(10).isoformat(),
+            "finished_at": at(11).isoformat(),
+        }
+
+        result = build_dashboard(
+            items, [], cards, snapshots, now=at(13), last_sync=last_sync
+        )["last_sync"]
+
+        self.assertEqual(
+            [(c["card"]["id"], c["previous_each"], c["value_each"], c["change"])
+             for c in result["changes"]],
+            [("c1", 100, 110, 20), ("c3", 30, 27, -3)],
+        )
+        self.assertAlmostEqual(result["changes"][0]["change_pct"], 10)
+        self.assertAlmostEqual(result["net_change"], 17)
+
+        self.assertIsNone(build_dashboard(items, [], cards, snapshots, now=at(13))["last_sync"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { getPortfolioDashboard } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
-import { money, percent, cardTitle } from "./format.js";
+import { money, percent, cardTitle, gradeLabel } from "./format.js";
 
 const CHART_RANGES = [
   { key: "1D", label: "1D" },
@@ -413,6 +413,77 @@ function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
   );
 }
 
+// What the last sync changed, card by card. Only cards whose price moved
+// are listed (the backend leaves out ones re-priced at the same value).
+function SyncSummary({ sync, onZoom }) {
+  const changes = sync?.changes || [];
+  const tone = (value) => (value >= 0 ? "positive" : "negative");
+
+  return (
+    <aside className="sync-summary-panel">
+      <p className="eyebrow">
+        {sync?.kind === "graded" ? "LAST SYNC · GRADED CARDS" : "LAST SYNC"}
+      </p>
+      <h3>{sync ? formatTimestamp(sync.finished_at, true) : "Price changes"}</h3>
+
+      {changes.length > 0 && (
+        <p className="sync-summary-totals">
+          {changes.length} {changes.length === 1 ? "card" : "cards"} changed ·{" "}
+          <strong className={tone(sync.net_change)}>
+            {signedMoney(sync.net_change)}
+          </strong>
+        </p>
+      )}
+
+      {!sync ? (
+        <div className="empty-state small">No sync has finished yet.</div>
+      ) : changes.length === 0 ? (
+        <div className="empty-state small">No prices changed in this sync.</div>
+      ) : (
+        <div className="sync-summary-list">
+          {changes.map((change) => (
+            <div
+              className="sync-change-row"
+              key={`${change.card.id}-${change.grade}`}
+            >
+              {change.card.image_url && (
+                <img
+                  className="thumb-clickable"
+                  src={change.card.image_url}
+                  alt={cardTitle(change.card)}
+                  onClick={() =>
+                    onZoom(change.card, {
+                      grade: change.grade,
+                      valueEach: change.value_each,
+                    })
+                  }
+                />
+              )}
+
+              <div className="sync-change-copy">
+                <strong>{cardTitle(change.card)}</strong>
+                <span>
+                  {change.card.set_name || "Unknown set"}
+                  {change.grade !== "RAW" && ` · ${gradeLabel(change.grade)}`}
+                </span>
+                <span className="sync-change-prices">
+                  {money(change.previous_each)} → {money(change.value_each)}
+                  {change.quantity > 1 && ` ×${change.quantity}`}
+                </span>
+              </div>
+
+              <div className={`sync-change-amount ${tone(change.change)}`}>
+                <strong>{signedMoney(change.change)}</strong>
+                <span>{percent(change.change_pct)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
+
 function DashboardHeading({ actions }) {
   return (
     <div className="dashboard-heading">
@@ -605,45 +676,7 @@ function Dashboard({ refreshKey, actions }) {
           )}
         </div>
 
-        <aside className="top-cards-panel">
-          <p className="eyebrow">TOP CARDS</p>
-          <h3>By value</h3>
-
-          {data.top_cards.length === 0 ? (
-            <div className="empty-state small">No priced cards yet.</div>
-          ) : (
-            <div className="top-cards-list">
-              {data.top_cards.map((row, index) => (
-                <div className="top-card-row" key={row.card.id}>
-                  <span className="top-card-rank">{index + 1}</span>
-
-                  {row.card.image_url && (
-                    <img
-                      className="thumb-clickable"
-                      src={row.card.image_url}
-                      alt={cardTitle(row.card)}
-                      onClick={() =>
-                        openZoom(row.card, {
-                          grade: row.grade,
-                          valueEach: row.value_each,
-                        })
-                      }
-                    />
-                  )}
-
-                  <div className="top-card-copy">
-                    <strong>{cardTitle(row.card)}</strong>
-                    <span>{row.card.set_name || "Unknown set"}</span>
-                  </div>
-
-                  <strong className="top-card-value">
-                    {money(row.value)}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
+        <SyncSummary sync={data.last_sync} onZoom={openZoom} />
       </div>
 
       <div className="movers-split">

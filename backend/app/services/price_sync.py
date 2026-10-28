@@ -790,6 +790,32 @@ async def _graded_refresh() -> None:
         _progress.update(running=False, phase=None)
 
 
+def last_finished_sync() -> dict[str, Any] | None:
+    """The most recent sync that finished, as {"kind", "started_at",
+    "finished_at"}: "prices" for Refresh Prices (which the scheduled GitHub
+    Action also runs), "graded" for Refresh Graded Cards. None before the
+    first one. A sync still running isn't counted until it finishes."""
+    state = _read_state() or {}
+    finished = [
+        {
+            "kind": kind,
+            "started_at": record["started_at"],
+            "finished_at": record["finished_at"],
+        }
+        for kind, record in (
+            ("prices", state.get("manual")),
+            ("graded", state.get("pricecharting")),
+        )
+        if record and record.get("started_at") and record.get("finished_at")
+    ]
+
+    return max(
+        finished,
+        key=lambda sync: datetime.fromisoformat(sync["started_at"]),
+        default=None,
+    )
+
+
 def get_status() -> dict[str, Any]:
     state = _read_state() or {}
     manual = state.get("manual")
