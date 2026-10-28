@@ -654,9 +654,8 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
-/* Sized by the chart beside it (contain: size keeps its list out of the
-   row's height), so a sync that changed many cards scrolls the list
-   instead of stretching the chart. */
+/* Full width under the chart. A sync that changed many cards scrolls its
+   list instead of stretching the card. */
 .sync-summary-panel {
   display: flex;
 
