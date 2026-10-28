@@ -320,14 +320,14 @@ class DashboardShape(unittest.TestCase):
             # Changed by hand after the sync, not by it.
             "c4": [saved(40, 0, 0), saved(45, 12, 12, manual=True)],
         }
-        last_sync = {
+        last_syncs = [{
             "kind": "prices",
             "started_at": at(10).isoformat(),
             "finished_at": at(11).isoformat(),
-        }
+        }]
 
         result = build_dashboard(
-            items, [], cards, snapshots, now=at(13), last_sync=last_sync
+            items, [], cards, snapshots, now=at(13), last_syncs=last_syncs
         )["last_sync"]
 
         self.assertEqual(

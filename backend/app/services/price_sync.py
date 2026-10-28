@@ -790,11 +790,12 @@ async def _graded_refresh() -> None:
         _progress.update(running=False, phase=None)
 
 
-def last_finished_sync() -> dict[str, Any] | None:
-    """The most recent sync that finished, as {"kind", "started_at",
-    "finished_at"}: "prices" for Refresh Prices (which the scheduled GitHub
-    Action also runs), "graded" for Refresh Graded Cards. None before the
-    first one. A sync still running isn't counted until it finishes."""
+def last_finished_syncs() -> list[dict[str, Any]]:
+    """The most recent finished sync of each kind, oldest first, each as
+    {"kind", "started_at", "finished_at"}: "prices" for Refresh Prices
+    (which the scheduled GitHub Action also runs) and "graded" for Refresh
+    Graded Cards. Empty before the first; a sync still running isn't
+    counted until it finishes."""
     state = _read_state() or {}
     finished = [
         {
@@ -809,11 +810,7 @@ def last_finished_sync() -> dict[str, Any] | None:
         if record and record.get("started_at") and record.get("finished_at")
     ]
 
-    return max(
-        finished,
-        key=lambda sync: datetime.fromisoformat(sync["started_at"]),
-        default=None,
-    )
+    return sorted(finished, key=lambda sync: datetime.fromisoformat(sync["started_at"]))
 
 
 def get_status() -> dict[str, Any]:

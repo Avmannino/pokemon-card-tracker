@@ -178,7 +178,7 @@ def _load_collection_data() -> dict[str, Any]:
         "events_recorded": events_recorded,
         "cards": db.get_cards(card_ids),
         "snapshots": db.get_price_snapshots_for_cards(card_ids),
-        "last_sync": price_sync.last_finished_sync(),
+        "last_syncs": price_sync.last_finished_syncs(),
     }
 
 
@@ -223,7 +223,7 @@ def _build_responses() -> dict[str, bytes]:
         cards=data["cards"],
         snapshots_by_card=data["snapshots"],
         events_recorded=data["events_recorded"],
-        last_sync=data["last_sync"],
+        last_syncs=data["last_syncs"],
     )
 
     return {

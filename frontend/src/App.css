@@ -685,6 +685,14 @@ h2 {
   letter-spacing: -0.02em;
 }
 
+.sync-summary-when {
+  margin: -6px 0 10px;
+
+  color: #737f93;
+
+  font-size: 0.74rem;
+}
+
 .sync-summary-totals {
   margin: 4px 0 0;
 

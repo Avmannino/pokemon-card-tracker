@@ -413,18 +413,31 @@ function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
   );
 }
 
-// What the last sync changed, card by card. Only cards whose price moved
-// are listed (the backend leaves out ones re-priced at the same value).
+const SYNC_NAMES = { prices: "Prices", graded: "Graded cards" };
+
+// What the latest syncs changed, card by card: the last price sync and the
+// last graded refresh together, so running one never hides the other's
+// changes. Only cards whose price moved are listed (the backend leaves out
+// ones re-priced at the same value).
 function SyncSummary({ sync, onZoom }) {
   const changes = sync?.changes || [];
   const tone = (value) => (value >= 0 ? "positive" : "negative");
 
   return (
     <aside className="sync-summary-panel">
-      <p className="eyebrow">
-        {sync?.kind === "graded" ? "LAST SYNC · GRADED CARDS" : "LAST SYNC"}
-      </p>
-      <h3>{sync ? formatTimestamp(sync.finished_at, true) : "Price changes"}</h3>
+      <p className="eyebrow">LAST SYNCS</p>
+      <h3>Price changes</h3>
+
+      {sync?.syncs?.length > 0 && (
+        <p className="sync-summary-when">
+          {sync.syncs
+            .map(
+              (each) =>
+                `${SYNC_NAMES[each.kind] || each.kind} ${formatTimestamp(each.finished_at, true)}`
+            )
+            .join(" · ")}
+        </p>
+      )}
 
       {changes.length > 0 && (
         <p className="sync-summary-totals">
@@ -438,7 +451,7 @@ function SyncSummary({ sync, onZoom }) {
       {!sync ? (
         <div className="empty-state small">No sync has finished yet.</div>
       ) : changes.length === 0 ? (
-        <div className="empty-state small">No prices changed in this sync.</div>
+        <div className="empty-state small">No prices changed in these syncs.</div>
       ) : (
         <div className="sync-summary-list">
           {changes.map((change) => (

@@ -564,22 +564,21 @@ def _weekly_movers(lots: list[Lot], now: datetime) -> dict[str, list[dict[str, A
 def _sync_changes(
     lots: list[Lot],
     snapshots_by_card: dict[str, list[dict[str, Any]]],
-    last_sync: dict[str, Any] | None,
+    syncs: list[dict[str, Any]] | None,
     now: datetime,
 ) -> dict[str, Any] | None:
-    """What the last sync changed: every card you hold whose price differs
-    from before it, largest move first.
+    """What the latest syncs changed (the last price sync and the last
+    graded refresh, together): every card you hold whose price differs from
+    before, largest move first.
 
     A sync's prices are the rows saved while it ran (created_at - a
     PokeTrace row's observed_at is when PokeTrace last updated it, which can
     predate the sync). Before = the price from rows saved earlier, after =
     including the sync's rows. A card the sync re-priced at the same value,
-    or priced for the first time, isn't a change."""
-    if not last_sync:
+    or priced for the first time, isn't a change. A card both syncs changed
+    is listed once, from its price before the first to after the second."""
+    if not syncs:
         return None
-
-    start = parse_ts(last_sync["started_at"])
-    end = parse_ts(last_sync["finished_at"])
 
     def saved_at(row: dict[str, Any]) -> datetime:
         return parse_ts(row.get("created_at") or row["observed_at"])
@@ -590,22 +589,40 @@ def _sync_changes(
         if lot.held(now):
             held[(lot.card["id"], lot.grade)].append(lot)
 
-    changes = []
-    for (card_id, grade), group in held.items():
-        rows = [row for row in snapshots_by_card.get(card_id, []) if row.get("grade") == grade]
-        if not any(start <= saved_at(row) <= end for row in rows):
-            continue
+    ordered = sorted(syncs, key=lambda sync: parse_ts(sync["started_at"]))
+    moves: dict[tuple[str, str], dict[str, Any]] = {}
 
-        card = group[0].card
-        before = PriceSeries([row for row in rows if saved_at(row) < start], grade, card).at(now)
-        after = PriceSeries([row for row in rows if saved_at(row) <= end], grade, card).at(now)
-        if before is None or after is None or round(after - before, 2) == 0:
+    for sync in ordered:
+        start = parse_ts(sync["started_at"])
+        end = parse_ts(sync["finished_at"])
+
+        for key, group in held.items():
+            card_id, grade = key
+            rows = [row for row in snapshots_by_card.get(card_id, []) if row.get("grade") == grade]
+            if not any(start <= saved_at(row) <= end for row in rows):
+                continue
+
+            card = group[0].card
+            before = PriceSeries([row for row in rows if saved_at(row) < start], grade, card).at(now)
+            after = PriceSeries([row for row in rows if saved_at(row) <= end], grade, card).at(now)
+            if before is None or after is None or round(after - before, 2) == 0:
+                continue
+
+            if key in moves:
+                moves[key]["after"] = after
+            else:
+                moves[key] = {"group": group, "before": before, "after": after}
+
+    changes = []
+    for (_, grade), move in moves.items():
+        before, after, group = move["before"], move["after"], move["group"]
+        if round(after - before, 2) == 0:
             continue
 
         quantity = sum(lot.held(now) for lot in group)
         changes.append(
             {
-                "card": card,
+                "card": group[0].card,
                 "grade": grade,
                 "quantity": quantity,
                 "previous_each": round(before, 2),
@@ -617,9 +634,14 @@ def _sync_changes(
 
     changes.sort(key=lambda change: abs(change["change"]), reverse=True)
     return {
-        "kind": last_sync["kind"],
-        "started_at": _iso(start),
-        "finished_at": _iso(end),
+        "syncs": [
+            {
+                "kind": sync["kind"],
+                "started_at": _iso(parse_ts(sync["started_at"])),
+                "finished_at": _iso(parse_ts(sync["finished_at"])),
+            }
+            for sync in ordered
+        ],
         "net_change": round(sum(change["change"] for change in changes), 2),
         "changes": changes,
     }
@@ -632,10 +654,10 @@ def build_dashboard(
     snapshots_by_card: dict[str, list[dict[str, Any]]],
     now: datetime | None = None,
     events_recorded: bool = True,
-    last_sync: dict[str, Any] | None = None,
+    last_syncs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """`last_sync`: the latest finished sync, as
-    price_sync.last_finished_sync() returns it."""
+    """`last_syncs`: the latest finished sync of each kind, as
+    price_sync.last_finished_syncs() returns them."""
     now = now or datetime.now(timezone.utc)
     lots, skipped = build_lots(items, events, cards, snapshots_by_card)
     performance = Performance(lots)
@@ -655,7 +677,7 @@ def build_dashboard(
         "current_total_value": round(performance.raw_value(now), 2),
         "ranges": ranges,
         "weekly_movers": _weekly_movers(lots, now),
-        "last_sync": _sync_changes(lots, snapshots_by_card, last_sync, now),
+        "last_sync": _sync_changes(lots, snapshots_by_card, last_syncs, now),
         "events": _event_log(lots),
         "tracking": {
             "events_recorded": events_recorded,
