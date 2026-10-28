@@ -443,7 +443,7 @@ h2 {
 .dashboard-main-row {
   display: grid;
 
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr);
 
   gap: 20px;
 
@@ -672,7 +672,31 @@ h2 {
 
   background: #0d121b;
 
-  contain: size;
+  margin-top: 20px;
+}
+
+/* Raw cards (last price sync) on the left, graded cards (last graded
+   refresh) on the right. */
+.sync-sections {
+  display: grid;
+
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  gap: 24px;
+}
+
+.sync-section {
+  display: flex;
+
+  flex-direction: column;
+
+  min-width: 0;
+}
+
+.sync-section + .sync-section {
+  padding-left: 24px;
+
+  border-left: 1px solid #1c232f;
 }
 
 .sync-summary-panel h3 {
@@ -686,7 +710,7 @@ h2 {
 }
 
 .sync-summary-when {
-  margin: -6px 0 10px;
+  margin: 4px 0 0;
 
   color: #737f93;
 
@@ -705,7 +729,7 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
-.sync-summary-panel > .empty-state {
+.sync-section > .empty-state {
   margin-top: 14px;
 }
 
@@ -719,6 +743,7 @@ h2 {
   gap: 10px;
 
   min-height: 0;
+  max-height: 360px;
 
   margin: 14px -8px 0 0;
   padding-right: 8px;
@@ -2315,15 +2340,6 @@ a.manual-source-link:hover {
     grid-template-columns: 1fr;
   }
 
-  /* Stacked under the chart: sized by its own list, up to a limit. */
-  .sync-summary-panel {
-    contain: none;
-  }
-
-  .sync-summary-list {
-    max-height: 420px;
-  }
-
   .collection-gallery {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -2361,8 +2377,17 @@ a.manual-source-link:hover {
   }
 
   .performance-row,
-  .movers-split {
+  .movers-split,
+  .sync-sections {
     grid-template-columns: 1fr;
+  }
+
+  .sync-section + .sync-section {
+    padding-top: 18px;
+    padding-left: 0;
+
+    border-top: 1px solid #1c232f;
+    border-left: 0;
   }
 
   .chart-card,

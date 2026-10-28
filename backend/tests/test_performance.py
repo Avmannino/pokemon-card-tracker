@@ -328,7 +328,7 @@ class DashboardShape(unittest.TestCase):
 
         result = build_dashboard(
             items, [], cards, snapshots, now=at(13), last_syncs=last_syncs
-        )["last_sync"]
+        )["last_sync"]["prices"]
 
         self.assertEqual(
             [(c["card"]["id"], c["previous_each"], c["value_each"], c["change"])

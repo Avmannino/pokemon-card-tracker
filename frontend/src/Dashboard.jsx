@@ -413,87 +413,107 @@ function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
   );
 }
 
-const SYNC_NAMES = { prices: "Prices", graded: "Graded cards" };
-
-// What the latest syncs changed, card by card: the last price sync and the
-// last graded refresh together, so running one never hides the other's
-// changes. Only cards whose price moved are listed (the backend leaves out
-// ones re-priced at the same value).
-function SyncSummary({ sync, onZoom }) {
-  const changes = sync?.changes || [];
+// One side of the Last Syncs card: what one sync changed, card by card.
+// Only cards whose price moved are listed (the backend leaves out ones
+// re-priced at the same value).
+function SyncChanges({ title, syncedLabel, notYet, section, onZoom }) {
+  const changes = section?.changes || [];
   const tone = (value) => (value >= 0 ? "positive" : "negative");
 
   return (
-    <aside className="sync-summary-panel">
-      <p className="eyebrow">LAST SYNCS</p>
-      <h3>Price changes</h3>
+    <div className="sync-section">
+      <h3>{title}</h3>
 
-      {sync?.syncs?.length > 0 && (
-        <p className="sync-summary-when">
-          {sync.syncs
-            .map(
-              (each) =>
-                `${SYNC_NAMES[each.kind] || each.kind} ${formatTimestamp(each.finished_at, true)}`
-            )
-            .join(" · ")}
-        </p>
-      )}
+      <p className="sync-summary-when">
+        {section
+          ? `${syncedLabel} ${formatTimestamp(section.finished_at, true)}`
+          : notYet}
+      </p>
 
       {changes.length > 0 && (
         <p className="sync-summary-totals">
           {changes.length} {changes.length === 1 ? "card" : "cards"} changed ·{" "}
-          <strong className={tone(sync.net_change)}>
-            {signedMoney(sync.net_change)}
+          <strong className={tone(section.net_change)}>
+            {signedMoney(section.net_change)}
           </strong>
         </p>
       )}
 
-      {!sync ? (
-        <div className="empty-state small">No sync has finished yet.</div>
-      ) : changes.length === 0 ? (
-        <div className="empty-state small">No prices changed in these syncs.</div>
+      {section && changes.length === 0 ? (
+        <div className="empty-state small">No prices changed.</div>
       ) : (
-        <div className="sync-summary-list">
-          {changes.map((change) => (
-            <div
-              className="sync-change-row"
-              key={`${change.card.id}-${change.grade}`}
-            >
-              {change.card.image_url && (
-                <img
-                  className="thumb-clickable"
-                  src={change.card.image_url}
-                  alt={cardTitle(change.card)}
-                  onClick={() =>
-                    onZoom(change.card, {
-                      grade: change.grade,
-                      valueEach: change.value_each,
-                    })
-                  }
-                />
-              )}
+        changes.length > 0 && (
+          <div className="sync-summary-list">
+            {changes.map((change) => (
+              <div
+                className="sync-change-row"
+                key={`${change.card.id}-${change.grade}`}
+              >
+                {change.card.image_url && (
+                  <img
+                    className="thumb-clickable"
+                    src={change.card.image_url}
+                    alt={cardTitle(change.card)}
+                    onClick={() =>
+                      onZoom(change.card, {
+                        grade: change.grade,
+                        valueEach: change.value_each,
+                      })
+                    }
+                  />
+                )}
 
-              <div className="sync-change-copy">
-                <strong>{cardTitle(change.card)}</strong>
-                <span>
-                  {change.card.set_name || "Unknown set"}
-                  {change.grade !== "RAW" && ` · ${gradeLabel(change.grade)}`}
-                </span>
-                <span className="sync-change-prices">
-                  {money(change.previous_each)} → {money(change.value_each)}
-                  {change.quantity > 1 && ` ×${change.quantity}`}
-                </span>
-              </div>
+                <div className="sync-change-copy">
+                  <strong>{cardTitle(change.card)}</strong>
+                  <span>
+                    {change.card.set_name || "Unknown set"}
+                    {change.grade !== "RAW" && ` · ${gradeLabel(change.grade)}`}
+                  </span>
+                  <span className="sync-change-prices">
+                    {money(change.previous_each)} → {money(change.value_each)}
+                    {change.quantity > 1 && ` ×${change.quantity}`}
+                  </span>
+                </div>
 
-              <div className={`sync-change-amount ${tone(change.change)}`}>
-                <strong>{signedMoney(change.change)}</strong>
-                <span>{percent(change.change_pct)}</span>
+                <div className={`sync-change-amount ${tone(change.change)}`}>
+                  <strong>{signedMoney(change.change)}</strong>
+                  <span>{percent(change.change_pct)}</span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )
       )}
-    </aside>
+    </div>
+  );
+}
+
+// What the latest syncs changed: raw cards from the last price sync on the
+// left, graded cards from the last graded refresh on the right. Running one
+// kind of sync never clears the other's list.
+function SyncSummary({ sync, onZoom }) {
+  return (
+    <section className="sync-summary-panel">
+      <p className="eyebrow">LAST SYNCS</p>
+
+      <div className="sync-sections">
+        <SyncChanges
+          title="Raw cards"
+          syncedLabel="Prices synced"
+          notYet="No price sync has finished yet."
+          section={sync?.prices}
+          onZoom={onZoom}
+        />
+
+        <SyncChanges
+          title="Graded cards"
+          syncedLabel="Graded cards refreshed"
+          notYet="No graded refresh has finished yet."
+          section={sync?.graded}
+          onZoom={onZoom}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -689,8 +709,9 @@ function Dashboard({ refreshKey, actions }) {
           )}
         </div>
 
-        <SyncSummary sync={data.last_sync} onZoom={openZoom} />
       </div>
+
+      <SyncSummary sync={data.last_sync} onZoom={openZoom} />
 
       <div className="movers-split">
         {[

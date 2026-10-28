@@ -62,10 +62,10 @@ POINTS_PER_RANGE = 120
 # collection, not as a market move after it joined.
 ENTRY_SETTLEMENT = timedelta(minutes=60)
 
-# Biggest winners and losers: the past week, top 5 of each.
+# Biggest winners and losers: the past week, top 3 of each.
 MOVER_WINDOW = timedelta(days=7)
 
-TOP_MOVER_COUNT = 5
+TOP_MOVER_COUNT = 3
 
 
 def parse_ts(value: Any) -> datetime:
@@ -567,21 +567,12 @@ def _sync_changes(
     syncs: list[dict[str, Any]] | None,
     now: datetime,
 ) -> dict[str, Any] | None:
-    """What the latest syncs changed (the last price sync and the last
-    graded refresh, together): every card you hold whose price differs from
-    before, largest move first.
-
-    A sync's prices are the rows saved while it ran (created_at - a
-    PokeTrace row's observed_at is when PokeTrace last updated it, which can
-    predate the sync). Before = the price from rows saved earlier, after =
-    including the sync's rows. A card the sync re-priced at the same value,
-    or priced for the first time, isn't a change. A card both syncs changed
-    is listed once, from its price before the first to after the second."""
+    """What the latest syncs changed, in two lists that never replace each
+    other: "prices" (raw cards, from the last price sync) and "graded"
+    (graded cards, from the last Refresh Graded Cards). Each is None until
+    that kind of sync has finished; the whole result is None before any."""
     if not syncs:
         return None
-
-    def saved_at(row: dict[str, Any]) -> datetime:
-        return parse_ts(row.get("created_at") or row["observed_at"])
 
     # Several collection rows of the same card and grade are one entry.
     held: dict[tuple[str, str], list[Lot]] = defaultdict(list)
@@ -589,40 +580,60 @@ def _sync_changes(
         if lot.held(now):
             held[(lot.card["id"], lot.grade)].append(lot)
 
-    ordered = sorted(syncs, key=lambda sync: parse_ts(sync["started_at"]))
-    moves: dict[tuple[str, str], dict[str, Any]] = {}
+    latest = {sync["kind"]: sync for sync in syncs}
+    return {
+        "prices": _changes_in_sync(
+            held, snapshots_by_card, latest.get("prices"), now, graded=False
+        ),
+        "graded": _changes_in_sync(
+            held, snapshots_by_card, latest.get("graded"), now, graded=True
+        ),
+    }
 
-    for sync in ordered:
-        start = parse_ts(sync["started_at"])
-        end = parse_ts(sync["finished_at"])
 
-        for key, group in held.items():
-            card_id, grade = key
-            rows = [row for row in snapshots_by_card.get(card_id, []) if row.get("grade") == grade]
-            if not any(start <= saved_at(row) <= end for row in rows):
-                continue
+def _changes_in_sync(
+    held: dict[tuple[str, str], list[Lot]],
+    snapshots_by_card: dict[str, list[dict[str, Any]]],
+    sync: dict[str, Any] | None,
+    now: datetime,
+    graded: bool,
+) -> dict[str, Any] | None:
+    """Every raw (or graded) card you hold whose price `sync` changed,
+    largest move first.
 
-            card = group[0].card
-            before = PriceSeries([row for row in rows if saved_at(row) < start], grade, card).at(now)
-            after = PriceSeries([row for row in rows if saved_at(row) <= end], grade, card).at(now)
-            if before is None or after is None or round(after - before, 2) == 0:
-                continue
+    A sync's prices are the rows saved while it ran (created_at - a
+    PokeTrace row's observed_at is when PokeTrace last updated it, which can
+    predate the sync). Before = the price from rows saved earlier, after =
+    including the sync's rows. A card the sync re-priced at the same value,
+    or priced for the first time, isn't a change."""
+    if sync is None:
+        return None
 
-            if key in moves:
-                moves[key]["after"] = after
-            else:
-                moves[key] = {"group": group, "before": before, "after": after}
+    start = parse_ts(sync["started_at"])
+    end = parse_ts(sync["finished_at"])
+
+    def saved_at(row: dict[str, Any]) -> datetime:
+        return parse_ts(row.get("created_at") or row["observed_at"])
 
     changes = []
-    for (_, grade), move in moves.items():
-        before, after, group = move["before"], move["after"], move["group"]
-        if round(after - before, 2) == 0:
+    for (card_id, grade), group in held.items():
+        if (grade != "RAW") != graded:
+            continue
+
+        rows = [row for row in snapshots_by_card.get(card_id, []) if row.get("grade") == grade]
+        if not any(start <= saved_at(row) <= end for row in rows):
+            continue
+
+        card = group[0].card
+        before = PriceSeries([row for row in rows if saved_at(row) < start], grade, card).at(now)
+        after = PriceSeries([row for row in rows if saved_at(row) <= end], grade, card).at(now)
+        if before is None or after is None or round(after - before, 2) == 0:
             continue
 
         quantity = sum(lot.held(now) for lot in group)
         changes.append(
             {
-                "card": group[0].card,
+                "card": card,
                 "grade": grade,
                 "quantity": quantity,
                 "previous_each": round(before, 2),
@@ -634,14 +645,8 @@ def _sync_changes(
 
     changes.sort(key=lambda change: abs(change["change"]), reverse=True)
     return {
-        "syncs": [
-            {
-                "kind": sync["kind"],
-                "started_at": _iso(parse_ts(sync["started_at"])),
-                "finished_at": _iso(parse_ts(sync["finished_at"])),
-            }
-            for sync in ordered
-        ],
+        "started_at": _iso(start),
+        "finished_at": _iso(end),
         "net_change": round(sum(change["change"] for change in changes), 2),
         "changes": changes,
     }
