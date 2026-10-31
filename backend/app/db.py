@@ -177,6 +177,14 @@ def set_item_variant_confirmed(item_id: str, confirmed: bool = True) -> bool:
     )
 
 
+def set_small_hit(item_ids: list[str], small_hit: bool) -> None:
+    """Moves collection rows into Small Hits (True) or back out (False)."""
+    if item_ids:
+        _client().table("collection_items").update({"small_hit": small_hit}).in_(
+            "id", list(item_ids)
+        ).execute()
+
+
 def set_item_cert(item_id: str, cert_number: str | None) -> None:
     """Raises if the column doesn't exist yet
     (supabase/migrations/2026-10-17_slab_images.sql)."""

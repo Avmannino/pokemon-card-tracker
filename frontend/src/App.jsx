@@ -84,6 +84,20 @@ function gradedRefreshText(status) {
     : "Graded cards only refresh when you press the button";
 }
 
+// Cards a sync moved across the $2 Small Hits line.
+function movedText(moved) {
+  const parts = [];
+
+  if (moved?.to_small_hits) {
+    parts.push(`${moved.to_small_hits} moved to Small Hits`);
+  }
+  if (moved?.to_collection) {
+    parts.push(`${moved.to_collection} moved back to the collection`);
+  }
+
+  return parts.length ? ` ${parts.join(", ")}.` : "";
+}
+
 function smallHitsSyncSummary(status) {
   const run = status?.small_hits;
 
@@ -98,7 +112,8 @@ function smallHitsSyncSummary(status) {
   return (
     `Small hits: prices updated for ${run.succeeded} of ${run.attempted} cards.` +
     (run.failed ? ` ${run.failed} failed.` : "") +
-    (run.stopped_early ? ` ${run.stopped_early}` : "")
+    (run.stopped_early ? ` ${run.stopped_early}` : "") +
+    movedText(run.moved)
   );
 }
 
@@ -121,7 +136,8 @@ function gradedRefreshSummary(status) {
     `Graded cards: ${run.updated} of ${run.attempted} updated from PriceCharting.` +
     (run.no_price ? ` ${run.no_price} had no price there.` : "") +
     (run.failed ? ` ${run.failed} failed.` : "") +
-    (run.stopped_early ? ` ${run.stopped_early}` : "")
+    (run.stopped_early ? ` ${run.stopped_early}` : "") +
+    movedText(run.moved)
   );
 }
 
@@ -152,7 +168,8 @@ function syncSummary(status) {
   return (
     `Synced: ${parts.join("; ")}.` +
     (failed ? ` ${failed} failed.` : "") +
-    (problems.length ? ` ${problems.join(" ")}` : "")
+    (problems.length ? ` ${problems.join(" ")}` : "") +
+    movedText(manual.moved)
   );
 }
 

@@ -353,7 +353,9 @@ refreshing the page never calls them; it only reads what's saved in Supabase.
 5. When you press **SYNC SMALL HITS** in the Small Hits drawer (after
    confirming). It prices only your small hits (cards kept in the drawer,
    e.g. ones worth under $2); nothing else ever prices them. Small hits
-   still count toward your collection value and charts.
+   still count toward your collection value and charts. After every sync (and
+   when you save PSA values), cards are re-sorted by value: under $2 each
+   moves into Small Hits, $2 or more back to the main collection.
 
 Searching is also live: each search is one PokeTrace request.
 

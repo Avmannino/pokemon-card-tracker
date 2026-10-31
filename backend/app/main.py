@@ -666,7 +666,20 @@ def save_graded_values(
         )
 
     snapshots = db.get_price_snapshots(card_id)
+    market_values = build_market_values(snapshots)
+
+    # A new PSA price can take the card across $2 either way.
+    try:
+        price_sync.apply_small_hit_moves(
+            *price_sync.small_hit_moves(
+                [item for item in db.get_collection_items() if item["card_id"] == card_id],
+                lambda item: market_values.get(item["ownership_grade"], {}).get("estimate"),
+            )
+        )
+    except Exception:
+        logger.exception("Moving card %s between Small Hits and the collection failed", card_id)
+
     return {
         "saved": len(saved),
-        "market_values": build_market_values(snapshots),
+        "market_values": market_values,
     }

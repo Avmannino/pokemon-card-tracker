@@ -600,6 +600,24 @@ class SmallHitsStayOutOfRegularSyncs(unittest.TestCase):
             self.assertEqual(price_sync._card_ids_for_pull(300, small_hits=True), (["small"], 0))
 
 
+class SmallHitsFollowValue(unittest.TestCase):
+    def test_cards_cross_the_two_dollar_line_both_ways(self):
+        items = [
+            {"id": "dropped", "small_hit": False},
+            {"id": "rose", "small_hit": True},
+            {"id": "at-two", "small_hit": True},
+            {"id": "still-small", "small_hit": True},
+            {"id": "still-big", "small_hit": False},
+            {"id": "unpriced", "small_hit": False},
+        ]
+        values = {"dropped": 1.99, "rose": 2.5, "at-two": 2.0, "still-small": 0.4, "still-big": 9.0}
+
+        self.assertEqual(
+            price_sync.small_hit_moves(items, lambda item: values.get(item["id"])),
+            (["dropped"], ["rose", "at-two"]),
+        )
+
+
 PRICE_GUIDE = """
 <div id="full-prices"><table>
   <tr><td>Grade 8</td><td class="price js-price">$14.00</td></tr>

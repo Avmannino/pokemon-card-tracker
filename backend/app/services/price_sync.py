@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 from .. import cache, db
 from ..config import settings
 from . import poketrace, pricecharting, state_store, tcggo
-from .valuation import is_manual_entry, is_variant_ambiguous, latest_by_source
+from .valuation import (
+    build_market_values,
+    is_manual_entry,
+    is_variant_ambiguous,
+    latest_by_source,
+)
 
 
 logger = logging.getLogger("price_sync")
@@ -34,6 +39,10 @@ RAW_SYNC_RESERVE = 20
 # TCGGO's free plan is a hard 100 requests/day, and a card can cost two
 # requests (id lookup + prices) the first time it is seen.
 MAX_GRADED_CARDS_PER_PULL = 40
+
+# Cards worth less than this each, in the grade you own, belong in Small
+# Hits; at or above it, in the main collection. Every sync re-sorts them.
+SMALL_HIT_LIMIT = 2.0
 
 # Refresh Prices runs a real sync, so repeated clicks are spaced out to keep
 # PokeTrace's 250/day and TCGGO's 100/day for the scheduled pulls.
@@ -669,6 +678,62 @@ async def run_scheduler() -> None:
         await asyncio.sleep(max(wait, 0) + 1)
 
 
+def small_hit_moves(items, value_each) -> tuple[list[str], list[str]]:
+    """(item ids to move into Small Hits, item ids to move back to the
+    collection), by each item's current value per card (`value_each`).
+    Items without a value stay where they are."""
+    to_small: list[str] = []
+    to_main: list[str] = []
+
+    for item in items:
+        each = value_each(item)
+        if each is None:
+            continue
+        if each < SMALL_HIT_LIMIT and not item.get("small_hit"):
+            to_small.append(item["id"])
+        elif each >= SMALL_HIT_LIMIT and item.get("small_hit"):
+            to_main.append(item["id"])
+
+    return to_small, to_main
+
+
+def apply_small_hit_moves(to_small: list[str], to_main: list[str]) -> dict[str, int]:
+    db.set_small_hit(to_small, True)
+    db.set_small_hit(to_main, False)
+    return {"to_small_hits": len(to_small), "to_collection": len(to_main)}
+
+
+def reclassify_small_hits() -> dict[str, int]:
+    """Puts every card on the side its current value belongs to: under $2
+    each into Small Hits, $2 or more back into the main collection."""
+    items = db.get_collection_items()
+    card_ids = list({item["card_id"] for item in items})
+    cards = db.get_cards(card_ids)
+    snapshots = db.get_price_snapshots_for_cards(card_ids)
+    values: dict[str, dict[str, Any]] = {}
+
+    def value_each(item: dict[str, Any]) -> float | None:
+        card = cards.get(item["card_id"])
+        if card is None:
+            return None
+        if card["id"] not in values:
+            values[card["id"]] = build_market_values(
+                list(reversed(snapshots.get(card["id"], []))), card
+            )
+        return values[card["id"]].get(item["ownership_grade"], {}).get("estimate")
+
+    return apply_small_hit_moves(*small_hit_moves(items, value_each))
+
+
+async def _reclassify(record: dict[str, Any]) -> None:
+    """After a sync: move cards that crossed $2 either way, noting how many
+    in `record` for the sync's summary."""
+    try:
+        record["moved"] = await asyncio.to_thread(reclassify_small_hits)
+    except Exception:
+        logger.exception("Moving cards between Small Hits and the collection failed")
+
+
 async def _rebuild_cache() -> None:
     """Rebuilds the collection and dashboard right away, so the page reload
     after a sync (and the first visit after a scheduled one) is instant."""
@@ -739,6 +804,8 @@ async def _manual_sync() -> None:
                 logger.exception("Manual price sync failed")
                 record["error"] = f"{type(exc).__name__}: {exc}"
 
+            await _reclassify(record)
+
             record["finished_at"] = _now().isoformat()
             state = _read_state() or {}
             state["manual"] = record
@@ -794,6 +861,8 @@ async def _graded_refresh() -> None:
             except Exception as exc:
                 logger.exception("Graded card refresh failed")
                 record["error"] = f"{type(exc).__name__}: {exc}"
+
+            await _reclassify(record)
 
             record["finished_at"] = _now().isoformat()
             state = _read_state() or {}
@@ -869,6 +938,8 @@ async def _small_hits_sync() -> None:
             except Exception as exc:
                 logger.exception("Small hits sync failed")
                 record["error"] = f"{type(exc).__name__}: {exc}"
+
+            await _reclassify(record)
 
             record["finished_at"] = _now().isoformat()
             state = _read_state() or {}
