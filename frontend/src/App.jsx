@@ -1767,6 +1767,12 @@ function App() {
                 </button>
               </div>
 
+              {/* The same search, right in the drawer. Hidden while the Add
+                  Card window (which shares it) is open. */}
+              {!smallHitSearchOpen && (
+                <div className="small-hits-search">{renderCardSearch()}</div>
+              )}
+
               {smallHitItems.length === 0 ? (
                 <div className="empty-state">
                   Use Add Card to add your first small hit.
