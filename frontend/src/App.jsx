@@ -372,6 +372,9 @@ function App() {
   const [smallHitsShown, setSmallHitsShown] = useState(false);
   const drawerTimer = useRef(null);
   const backdropPressed = useRef(false);
+  // The drawer's Add Card window (card search, then the usual Add form).
+  const [smallHitSearchOpen, setSmallHitSearchOpen] = useState(false);
+  const searchBackdropPressed = useRef(false);
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
@@ -698,7 +701,19 @@ function App() {
     );
   }
 
+  function openSmallHitSearch() {
+    clearCardSearch();
+    setSmallHitSearchOpen(true);
+    setTimeout(() => searchInputRef.current?.focus(), 0);
+  }
+
+  function closeSmallHitSearch() {
+    clearCardSearch();
+    setSmallHitSearchOpen(false);
+  }
+
   function closeSmallHits() {
+    setSmallHitSearchOpen(false);
     clearCardSearch();
     setSmallHitsShown(false);
     clearTimeout(drawerTimer.current);
@@ -717,12 +732,18 @@ function App() {
 
     function handleKeyDown(event) {
       if (
-        event.key === "Escape" &&
-        !addForm.card &&
-        !psaForm.item &&
-        !variantItem &&
-        !zoomedCard
+        event.key !== "Escape" ||
+        addForm.card ||
+        psaForm.item ||
+        variantItem ||
+        zoomedCard
       ) {
+        return;
+      }
+
+      if (smallHitSearchOpen) {
+        closeSmallHitSearch();
+      } else {
         closeSmallHits();
       }
     }
@@ -732,7 +753,7 @@ function App() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [smallHitsMounted, addForm.card, psaForm.item, variantItem, zoomedCard]);
+  }, [smallHitsMounted, smallHitSearchOpen, addForm.card, psaForm.item, variantItem, zoomedCard]);
 
   // Small hits are only ever priced from the drawer, after you confirm.
   async function handleSmallHitsSync() {
@@ -1717,19 +1738,70 @@ function App() {
             </div>
 
             <div className="small-hits-body">
-              {renderStatus()}
+              {!smallHitSearchOpen && renderStatus()}
 
-              <div className="small-hits-search">{renderCardSearch()}</div>
+              <div className="small-hits-toolbar">
+                <button
+                  type="button"
+                  className="sync-button primary"
+                  onClick={openSmallHitSearch}
+                >
+                  + Add Card
+                </button>
+              </div>
 
               {smallHitItems.length === 0 ? (
                 <div className="empty-state">
-                  Search for a card above to add your first small hit.
+                  Use Add Card to add your first small hit.
                 </div>
               ) : (
                 renderTable(sortedSmallHits)
               )}
             </div>
           </section>
+        </div>
+      )}
+
+      {smallHitsMounted && smallHitSearchOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            searchBackdropPressed.current = event.target === event.currentTarget;
+          }}
+          onClick={(event) => {
+            if (searchBackdropPressed.current && event.target === event.currentTarget) {
+              closeSmallHitSearch();
+            }
+            searchBackdropPressed.current = false;
+          }}
+        >
+          <div
+            className="modal small-hit-search-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add a small hit"
+          >
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">ADD TO SMALL HITS</p>
+                <h2>Search Pokémon cards</h2>
+                <span>Cards you add here go to Small Hits.</span>
+              </div>
+
+              <button
+                type="button"
+                className="close-button"
+                aria-label="Close"
+                onClick={closeSmallHitSearch}
+              >
+                ×
+              </button>
+            </div>
+
+            {renderStatus()}
+
+            {renderCardSearch()}
+          </div>
         </div>
       )}
 
