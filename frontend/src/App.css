@@ -2878,7 +2878,7 @@ a.manual-source-link:hover {
   flex-direction: column;
 
   width: min(1480px, 100%);
-  max-height: 88vh;
+  max-height: 82vh;
 
   margin: 0 auto;
 
@@ -2902,14 +2902,14 @@ a.manual-source-link:hover {
   transform: translateY(0);
 }
 
+/* Summary on the left, SYNC SMALL HITS in the middle, close on the right,
+   so the two buttons are never next to each other. */
 .small-hits-header {
-  display: flex;
+  display: grid;
 
-  flex-wrap: wrap;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 
-  align-items: flex-start;
-
-  justify-content: space-between;
+  align-items: center;
 
   gap: 14px;
 
@@ -2928,12 +2928,35 @@ a.manual-source-link:hover {
   font-size: 0.8rem;
 }
 
-.small-hits-actions {
-  display: flex;
+.small-hits-close {
+  justify-self: end;
+}
 
-  align-items: center;
+.small-hits-sync-button {
+  padding: 6px 12px;
 
-  gap: 10px;
+  border: 1px solid #e05656;
+
+  border-radius: 8px;
+
+  background: #c93b3b;
+
+  box-shadow: 0 4px 12px rgba(201, 59, 59, 0.3);
+
+  color: #ffffff;
+
+  font-size: 0.72rem;
+  font-weight: 800;
+
+  letter-spacing: 0.04em;
+
+  white-space: nowrap;
+
+  transition: background 140ms ease;
+}
+
+.small-hits-sync-button:hover:not(:disabled) {
+  background: #d94848;
 }
 
 .small-hits-body {
@@ -2966,7 +2989,34 @@ a.manual-source-link:hover {
   }
 
   .small-hits-drawer {
-    max-height: 92vh;
+    max-height: 90vh;
+  }
+
+  /* Phones: summary and close on top, the sync button on its own row. */
+  .small-hits-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+
+    grid-template-areas:
+      "summary close"
+      "sync sync";
+  }
+
+  .small-hits-summary {
+    grid-area: summary;
+  }
+
+  .small-hits-close {
+    grid-area: close;
+
+    align-self: start;
+  }
+
+  .small-hits-sync-button {
+    grid-area: sync;
+
+    padding: 10px 16px;
+
+    font-size: 0.86rem;
   }
 
   .small-hits-header,

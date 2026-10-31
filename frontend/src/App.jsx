@@ -370,6 +370,8 @@ function App() {
   // once it's in the page, so it animates both ways.
   const [smallHitsMounted, setSmallHitsMounted] = useState(false);
   const [smallHitsShown, setSmallHitsShown] = useState(false);
+  const drawerTimer = useRef(null);
+  const backdropPressed = useRef(false);
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
@@ -687,6 +689,8 @@ function App() {
   // from a clear box.
   function openSmallHits() {
     clearCardSearch();
+    // Reopened while still closing: keep it instead of removing it.
+    clearTimeout(drawerTimer.current);
     setSmallHitsMounted(true);
     // Shown a frame after mounting, so it slides up instead of appearing.
     requestAnimationFrame(() =>
@@ -697,7 +701,8 @@ function App() {
   function closeSmallHits() {
     clearCardSearch();
     setSmallHitsShown(false);
-    setTimeout(() => setSmallHitsMounted(false), DRAWER_MS);
+    clearTimeout(drawerTimer.current);
+    drawerTimer.current = setTimeout(() => setSmallHitsMounted(false), DRAWER_MS);
   }
 
   // While the drawer is open the page behind it doesn't scroll, and Escape
@@ -1660,17 +1665,26 @@ function App() {
       {smallHitsMounted && (
         <div
           className={`modal-backdrop small-hits-backdrop ${smallHitsShown ? "open" : ""}`}
-          onClick={closeSmallHits}
+          // A click anywhere off the drawer slides it back down and closes
+          // it; one that started inside it (e.g. selecting text) doesn't.
+          onMouseDown={(event) => {
+            backdropPressed.current = event.target === event.currentTarget;
+          }}
+          onClick={(event) => {
+            if (backdropPressed.current && event.target === event.currentTarget) {
+              closeSmallHits();
+            }
+            backdropPressed.current = false;
+          }}
         >
           <section
             className="small-hits-drawer"
             role="dialog"
             aria-modal="true"
             aria-label="Small Hits"
-            onClick={(event) => event.stopPropagation()}
           >
             <div className="small-hits-header">
-              <div>
+              <div className="small-hits-summary">
                 <p className="eyebrow">SMALL HITS</p>
                 <h2>{money(collection.summary?.small_hits_total || 0)}</h2>
                 <span>
@@ -1681,25 +1695,25 @@ function App() {
                 </span>
               </div>
 
-              <div className="small-hits-actions">
-                <button
-                  type="button"
-                  className="sync-button primary"
-                  onClick={handleSmallHitsSync}
-                  disabled={syncing || smallHitItems.length === 0}
-                >
-                  {smallHitsRunning ? "Syncing…" : "SYNC SMALL HITS"}
-                </button>
+              {/* Kept well away from the close button so closing never
+                  starts a sync by accident. */}
+              <button
+                type="button"
+                className="small-hits-sync-button"
+                onClick={handleSmallHitsSync}
+                disabled={syncing || smallHitItems.length === 0}
+              >
+                {smallHitsRunning ? "Syncing…" : "SYNC SMALL HITS"}
+              </button>
 
-                <button
-                  type="button"
-                  className="close-button"
-                  aria-label="Close Small Hits"
-                  onClick={closeSmallHits}
-                >
-                  ×
-                </button>
-              </div>
+              <button
+                type="button"
+                className="close-button small-hits-close"
+                aria-label="Close Small Hits"
+                onClick={closeSmallHits}
+              >
+                ×
+              </button>
             </div>
 
             <div className="small-hits-body">
