@@ -298,6 +298,34 @@ function sortValue(item, key) {
 }
 
 // `smallHit`: opened from the Small Hits drawer, so the card goes there.
+// Your cards matching a search of your own collection. Every
+// space-separated term must match somewhere on the item, so "lugia psa 9"
+// narrows rather than widens.
+function filterItems(items, query) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+
+  if (terms.length === 0) {
+    return items;
+  }
+
+  return items.filter((item) => {
+    const haystack = [
+      item.card.name,
+      item.card.card_number,
+      item.card.set_name,
+      item.card.rarity,
+      item.card.variant,
+      gradeLabel(item.ownership_grade),
+      item.notes,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return terms.every((term) => haystack.includes(term));
+  });
+}
+
 function emptyAddForm(card = null, smallHit = false) {
   return {
     card,
@@ -391,6 +419,9 @@ function App() {
   const backdropPressed = useRef(false);
   // The drawer's Add Card window (card search, then the usual Add form).
   const [smallHitSearchOpen, setSmallHitSearchOpen] = useState(false);
+  // Searches the small hits you have (the Add Card window searches the
+  // market).
+  const [smallHitsQuery, setSmallHitsQuery] = useState("");
   const searchBackdropPressed = useRef(false);
 
   const [addForm, setAddForm] = useState(emptyAddForm());
@@ -478,35 +509,14 @@ function App() {
     [collection.items]
   );
 
-  // Every space-separated term must match somewhere on the item, so
-  // "lugia psa 9" narrows rather than widens.
-  const filteredItems = useMemo(() => {
-    const terms = collectionQuery
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(Boolean);
-
-    if (terms.length === 0) {
-      return regularItems;
-    }
-
-    return regularItems.filter((item) => {
-      const haystack = [
-        item.card.name,
-        item.card.card_number,
-        item.card.set_name,
-        item.card.rarity,
-        item.card.variant,
-        gradeLabel(item.ownership_grade),
-        item.notes,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return terms.every((term) => haystack.includes(term));
-    });
-  }, [regularItems, collectionQuery]);
+  const filteredItems = useMemo(
+    () => filterItems(regularItems, collectionQuery),
+    [regularItems, collectionQuery]
+  );
+  const filteredSmallHits = useMemo(
+    () => filterItems(smallHitItems, smallHitsQuery),
+    [smallHitItems, smallHitsQuery]
+  );
 
   // Cards with no price for a column sort to the bottom either way, so
   // flipping the direction never buries the priced ones.
@@ -537,7 +547,7 @@ function App() {
   }
 
   const sortedItems = useMemo(() => sortRows(filteredItems), [filteredItems, sort]);
-  const sortedSmallHits = useMemo(() => sortRows(smallHitItems), [smallHitItems, sort]);
+  const sortedSmallHits = useMemo(() => sortRows(filteredSmallHits), [filteredSmallHits, sort]);
 
   function toggleSort(column) {
     if (!column.key) {
@@ -1767,15 +1777,31 @@ function App() {
                 </button>
               </div>
 
-              {/* The same search, right in the drawer. Hidden while the Add
-                  Card window (which shares it) is open. */}
-              {!smallHitSearchOpen && (
-                <div className="small-hits-search">{renderCardSearch()}</div>
+              {smallHitItems.length > 0 && (
+                <div className="collection-search">
+                  <input
+                    type="search"
+                    value={smallHitsQuery}
+                    onChange={(event) => setSmallHitsQuery(event.target.value)}
+                    placeholder="Search your small hits by name, set, number..."
+                    aria-label="Search your small hits"
+                  />
+
+                  {smallHitsQuery.trim() && (
+                    <span>
+                      Showing {filteredSmallHits.length} of {smallHitItems.length}
+                    </span>
+                  )}
+                </div>
               )}
 
               {smallHitItems.length === 0 ? (
                 <div className="empty-state">
                   Use Add Card to add your first small hit.
+                </div>
+              ) : filteredSmallHits.length === 0 ? (
+                <div className="empty-state">
+                  No small hits match "{smallHitsQuery.trim()}".
                 </div>
               ) : (
                 renderTable(sortedSmallHits)

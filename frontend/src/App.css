@@ -2965,10 +2965,6 @@ a.manual-source-link:hover {
   padding: 18px 26px calc(26px + env(safe-area-inset-bottom, 0px));
 }
 
-.small-hits-search {
-  margin-bottom: 18px;
-}
-
 .small-hits-toolbar {
   display: flex;
 
