@@ -349,6 +349,23 @@ async def add_to_collection(
 
     card = db.get_card(card["id"])
 
+    # The card goes where its value puts it, whichever page added it: under
+    # $2 each into Small Hits, $2 or more into the main collection. With no
+    # price yet (e.g. a graded card before you enter PSA values), it stays
+    # where you added it.
+    value_each = (
+        build_market_values(db.get_price_snapshots(card["id"]), card)
+        .get(item["ownership_grade"], {})
+        .get("estimate")
+    )
+    to_small, to_main = price_sync.small_hit_moves([item], lambda _: value_each)
+    if to_small or to_main:
+        try:
+            price_sync.apply_small_hit_moves(to_small, to_main)
+            item = {**item, "small_hit": bool(to_small)}
+        except Exception:
+            logger.exception("Placing new card %s by value failed", item["id"])
+
     return {
         "item": serialize_collection_item(item, card),
         "price_error": price_error,

@@ -856,13 +856,22 @@ function App() {
       searchInputRef.current?.focus();
       await loadCollection();
 
+      // The backend places the card by its value, which may not be the
+      // page you added it from.
+      const placedSmall = Boolean(result.item?.small_hit);
+      const moved = placedSmall !== Boolean(addForm.smallHit);
+
       setMessage(
         result.price_error
           ? `Card added, but its raw price could not be fetched: ${result.price_error}. ` +
             "It will fill in at the next scheduled pull."
-          : addForm.smallHit
-            ? "Added to Small Hits."
-            : "Card added and raw market price fetched."
+          : moved
+            ? placedSmall
+              ? "Card added to Small Hits, since it's worth under $2."
+              : "Card added to your main collection, since it's worth $2 or more."
+            : placedSmall
+              ? "Added to Small Hits."
+              : "Card added and raw market price fetched."
       );
     } catch (err) {
       setError(err.message);

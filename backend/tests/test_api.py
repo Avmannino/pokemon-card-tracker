@@ -49,6 +49,10 @@ class FakeDB:
         self.cards[row["id"]] = row
         return row
 
+    def set_small_hit(self, item_ids, small_hit):
+        for item_id in item_ids:
+            self.items[item_id]["small_hit"] = small_hit
+
     def add_collection_item(self, card_id, quantity, ownership_grade, purchase_price, notes, small_hit=False):
         item = {
             "id": f"item-{next(self.ids)}", "card_id": card_id, "quantity": quantity,
@@ -122,7 +126,7 @@ class ApiTestCase(unittest.TestCase):
             "get_collection_items", "delete_collection_item", "insert_price_snapshot",
             "get_price_snapshots", "get_collection_events", "insert_collection_event",
             "delete_collection_event", "update_card_variant_siblings",
-            "set_item_variant_confirmed",
+            "set_item_variant_confirmed", "set_small_hit",
         ):
             patches.append(mock.patch.object(db, name, getattr(self.fake, name)))
 
