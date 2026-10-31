@@ -204,7 +204,17 @@ def _build_collection(data: dict[str, Any]) -> dict[str, Any]:
         "items": serialized,
         "summary": {
             "item_count": len(serialized),
+            # Includes the small hits, which are part of your collection.
             "known_market_total": round(sum(known_totals), 2),
+            "small_hits_count": sum(1 for item in serialized if item.get("small_hit")),
+            "small_hits_total": round(
+                sum(
+                    float(item["owned_market_value_total"])
+                    for item in serialized
+                    if item.get("small_hit") and item["owned_market_value_total"] is not None
+                ),
+                2,
+            ),
             "items_missing_owned_value": sum(
                 1
                 for item in serialized
@@ -294,6 +304,7 @@ async def add_to_collection(
         ownership_grade=request.ownership_grade,
         purchase_price=request.purchase_price,
         notes=request.notes,
+        small_hit=request.small_hit,
     )
 
     if request.variant_siblings:
@@ -527,6 +538,7 @@ async def set_collection_variant(
         ownership_grade=item["ownership_grade"],
         purchase_price=item.get("purchase_price"),
         notes=item.get("notes"),
+        small_hit=bool(item.get("small_hit")),
     )
     _record_add_event(new_item)
 
@@ -596,6 +608,19 @@ async def refresh_graded() -> dict[str, bool]:
     progress is reported by /api/refresh-status."""
     try:
         price_sync.start_graded_refresh()
+    except price_sync.SyncBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"started": True}
+
+
+@app.post("/api/refresh-small-hits", status_code=202)
+async def refresh_small_hits() -> dict[str, bool]:
+    """"SYNC SMALL HITS": prices the cards in the Small Hits drawer in the
+    background. Nothing else ever syncs them; progress is reported by
+    /api/refresh-status."""
+    try:
+        price_sync.start_small_hits_sync()
     except price_sync.SyncBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

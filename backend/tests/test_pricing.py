@@ -586,6 +586,20 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["skipped_manual_price"], 1)
 
 
+class SmallHitsStayOutOfRegularSyncs(unittest.TestCase):
+    def test_each_sync_pulls_only_its_own_cards(self):
+        items = [
+            {"id": "i1", "card_id": "regular", "ownership_grade": "RAW"},
+            {"id": "i2", "card_id": "small", "ownership_grade": "RAW", "small_hit": True},
+            # Held both ways: the regular syncs price it.
+            {"id": "i3", "card_id": "both", "ownership_grade": "RAW"},
+            {"id": "i4", "card_id": "both", "ownership_grade": "RAW", "small_hit": True},
+        ]
+        with mock.patch.object(price_sync.db, "get_collection_items", lambda: items):
+            self.assertEqual(price_sync._card_ids_for_pull(300), (["regular", "both"], 0))
+            self.assertEqual(price_sync._card_ids_for_pull(300, small_hits=True), (["small"], 0))
+
+
 PRICE_GUIDE = """
 <div id="full-prices"><table>
   <tr><td>Grade 8</td><td class="price js-price">$14.00</td></tr>

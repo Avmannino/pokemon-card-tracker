@@ -350,6 +350,10 @@ refreshing the page never calls them; it only reads what's saved in Supabase.
    card).
 4. When you press **Refresh Graded Cards**, which only re-reads your
    PriceCharting links (below). Nothing else ever triggers it.
+5. When you press **SYNC SMALL HITS** in the Small Hits drawer (after
+   confirming). It prices only your small hits (cards kept in the drawer,
+   e.g. ones worth under $2); nothing else ever prices them. Small hits
+   still count toward your collection value and charts.
 
 Searching is also live: each search is one PokeTrace request.
 

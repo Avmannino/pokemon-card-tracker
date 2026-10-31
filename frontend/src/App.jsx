@@ -9,6 +9,7 @@ import {
   searchCards,
   setCollectionVariant,
   startGradedRefresh,
+  startSmallHitsSync,
   startSync,
 } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
@@ -32,6 +33,9 @@ const SEARCH_PAGE_SIZE = 10;
 const SUGGEST_MIN_CHARS = 3;
 const SUGGEST_DELAY_MS = 500;
 const SUGGEST_LIMIT = 8;
+
+// How long the Small Hits drawer takes to slide up or down.
+const DRAWER_MS = 320;
 
 function pullTime(iso) {
   return new Date(iso).toLocaleString("en-US", {
@@ -58,6 +62,10 @@ function refreshStatusText(status) {
       return `Refreshing graded cards… ${done}/${total}`;
     }
 
+    if (kind === "small_hits") {
+      return `Syncing small hits… ${done}/${total}`;
+    }
+
     return `Syncing ${phase === "graded" ? "graded" : "raw"} prices… ${done}/${total}`;
   }
 
@@ -74,6 +82,24 @@ function gradedRefreshText(status) {
   return finished
     ? `Graded cards last refreshed ${pullTime(finished)}`
     : "Graded cards only refresh when you press the button";
+}
+
+function smallHitsSyncSummary(status) {
+  const run = status?.small_hits;
+
+  if (!run) {
+    return "Small hits sync finished.";
+  }
+
+  if (run.error) {
+    return `Small hits sync stopped early: ${run.error}`;
+  }
+
+  return (
+    `Small hits: prices updated for ${run.succeeded} of ${run.attempted} cards.` +
+    (run.failed ? ` ${run.failed} failed.` : "") +
+    (run.stopped_early ? ` ${run.stopped_early}` : "")
+  );
 }
 
 function gradedRefreshSummary(status) {
@@ -254,9 +280,11 @@ function sortValue(item, key) {
   }
 }
 
-function emptyAddForm(card = null) {
+// `smallHit`: opened from the Small Hits drawer, so the card goes there.
+function emptyAddForm(card = null, smallHit = false) {
   return {
     card,
+    smallHit,
     quantity: 1,
     ownership_grade: "RAW",
     purchase_price: "",
@@ -335,6 +363,13 @@ function App() {
   const gradedRunning =
     gradedRefreshing ||
     (syncing && refreshStatus?.progress?.kind === "graded_refresh");
+  const smallHitsRunning =
+    syncing && refreshStatus?.progress?.kind === "small_hits";
+
+  // The Small Hits drawer: mounted while open or closing, shown (slid up)
+  // once it's in the page, so it animates both ways.
+  const [smallHitsMounted, setSmallHitsMounted] = useState(false);
+  const [smallHitsShown, setSmallHitsShown] = useState(false);
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
@@ -411,6 +446,16 @@ function App() {
     [collection]
   );
 
+  // Small hits live in their own drawer; the main table has the rest.
+  const regularItems = useMemo(
+    () => collection.items.filter((item) => !item.small_hit),
+    [collection.items]
+  );
+  const smallHitItems = useMemo(
+    () => collection.items.filter((item) => item.small_hit),
+    [collection.items]
+  );
+
   // Every space-separated term must match somewhere on the item, so
   // "lugia psa 9" narrows rather than widens.
   const filteredItems = useMemo(() => {
@@ -420,10 +465,10 @@ function App() {
       .filter(Boolean);
 
     if (terms.length === 0) {
-      return collection.items;
+      return regularItems;
     }
 
-    return collection.items.filter((item) => {
+    return regularItems.filter((item) => {
       const haystack = [
         item.card.name,
         item.card.card_number,
@@ -439,18 +484,18 @@ function App() {
 
       return terms.every((term) => haystack.includes(term));
     });
-  }, [collection.items, collectionQuery]);
+  }, [regularItems, collectionQuery]);
 
   // Cards with no price for a column sort to the bottom either way, so
   // flipping the direction never buries the priced ones.
-  const sortedItems = useMemo(() => {
+  function sortRows(rows) {
     if (!sort.key) {
-      return filteredItems;
+      return rows;
     }
 
     const direction = sort.direction === "asc" ? 1 : -1;
 
-    return [...filteredItems].sort((a, b) => {
+    return [...rows].sort((a, b) => {
       const left = sortValue(a, sort.key);
       const right = sortValue(b, sort.key);
 
@@ -467,7 +512,10 @@ function App() {
 
       return (left - right) * direction;
     });
-  }, [filteredItems, sort]);
+  }
+
+  const sortedItems = useMemo(() => sortRows(filteredItems), [filteredItems, sort]);
+  const sortedSmallHits = useMemo(() => sortRows(smallHitItems), [smallHitItems, sort]);
 
   function toggleSort(column) {
     if (!column.key) {
@@ -572,11 +620,14 @@ function App() {
     setSuggestOpen(false);
     setSearchResults(Array.isArray(suggestions) ? suggestions : [card]);
     setSearchPage(0);
-    setAddForm(emptyAddForm(card));
+    setAddForm(emptyAddForm(card, smallHitsMounted));
   }
 
   function handleSearchKeyDown(event) {
     if (event.key === "Escape") {
+      if (suggestOpen) {
+        event.stopPropagation();
+      }
       setSuggestOpen(false);
       return;
     }
@@ -625,6 +676,93 @@ function App() {
     }
   }
 
+  function clearCardSearch() {
+    setQuery("");
+    setSearchResults([]);
+    setSearchPage(0);
+    setSuggestOpen(false);
+  }
+
+  // The drawer and the main page share one card search, so each starts
+  // from a clear box.
+  function openSmallHits() {
+    clearCardSearch();
+    setSmallHitsMounted(true);
+    // Shown a frame after mounting, so it slides up instead of appearing.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => setSmallHitsShown(true))
+    );
+  }
+
+  function closeSmallHits() {
+    clearCardSearch();
+    setSmallHitsShown(false);
+    setTimeout(() => setSmallHitsMounted(false), DRAWER_MS);
+  }
+
+  // While the drawer is open the page behind it doesn't scroll, and Escape
+  // closes it (unless a window on top of it is open).
+  useEffect(() => {
+    if (!smallHitsMounted) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event) {
+      if (
+        event.key === "Escape" &&
+        !addForm.card &&
+        !psaForm.item &&
+        !variantItem &&
+        !zoomedCard
+      ) {
+        closeSmallHits();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [smallHitsMounted, addForm.card, psaForm.item, variantItem, zoomedCard]);
+
+  // Small hits are only ever priced from the drawer, after you confirm.
+  async function handleSmallHitsSync() {
+    const cards = new Set(smallHitItems.map((item) => item.card_id)).size;
+    const requests = Math.max(1, Math.ceil(cards / 20));
+
+    const confirmed = window.confirm(
+      `Are you sure you want to sync your ${cards} small hits?\n\n` +
+        `This uses about ${requests} PokeTrace request${requests === 1 ? "" : "s"} ` +
+        "of your 250 a day."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setError("");
+    setMessage("");
+
+    try {
+      await startSmallHitsSync();
+    } catch (err) {
+      // Includes "already running" from the server.
+      setError(err.message);
+      loadRefreshStatus();
+      return;
+    }
+
+    try {
+      const status = await watchSync();
+      setMessage(smallHitsSyncSummary(status));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function handleAdd(event) {
     event.preventDefault();
 
@@ -654,6 +792,7 @@ function App() {
           rarity: other.rarity,
           raw_market_estimate: other.raw_market_estimate,
         })),
+        small_hit: addForm.smallHit,
       };
 
       const result = await addCollectionItem(payload);
@@ -668,7 +807,9 @@ function App() {
         result.price_error
           ? `Card added, but its raw price could not be fetched: ${result.price_error}. ` +
             "It will fill in at the next scheduled pull."
-          : "Card added and raw market price fetched."
+          : addForm.smallHit
+            ? "Added to Small Hits."
+            : "Card added and raw market price fetched."
       );
     } catch (err) {
       setError(err.message);
@@ -828,59 +969,11 @@ function App() {
     }
   }
 
-  return (
-    <main className="app-shell">
-      <section className="hero">
-        <div className="portfolio-card">
-          <span>Known collection value</span>
-
-          <strong>{money(ownedTotal)}</strong>
-
-          <small>
-            {collection.summary?.item_count || 0} collection entries
-          </small>
-        </div>
-      </section>
-
-      <Dashboard
-        refreshKey={dashboardVersion}
-        actions={
-          <div className="refresh-control">
-            <div className="refresh-buttons">
-              <button
-                type="button"
-                className="sync-button primary"
-                onClick={handleSyncNow}
-                disabled={syncing}
-              >
-                {syncing && !gradedRunning ? "Syncing…" : "Refresh Prices"}
-              </button>
-
-              <button
-                type="button"
-                className="sync-button"
-                onClick={handleGradedRefresh}
-                disabled={syncing}
-              >
-                {gradedRunning ? "Refreshing…" : "Refresh Graded Cards"}
-              </button>
-            </div>
-
-            <small>{refreshStatusText(refreshStatus)}</small>
-            <small>{gradedRefreshText(refreshStatus)}</small>
-          </div>
-        }
-      />
-
-      <section className="search-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">ADD A CARD</p>
-            <h2>Search Pokémon cards</h2>
-          </div>
-
-        </div>
-
+  // The card search box, its dropdown and its results. The main page and
+  // the Small Hits drawer show it one at a time, sharing its state.
+  function renderCardSearch() {
+    return (
+      <>
         <form
           className="search-form"
           onSubmit={handleSearch}
@@ -1062,7 +1155,7 @@ function App() {
                         <button
                           type="button"
                           onClick={() =>
-                            setAddForm(emptyAddForm(card))
+                            setAddForm(emptyAddForm(card, smallHitsMounted))
                           }
                         >
                           Add
@@ -1117,9 +1210,16 @@ function App() {
             )}
           </>
         )}
-      </section>
+      </>
+    );
+  }
 
-      {(message || error) && (
+  function renderStatus() {
+    if (!message && !error) {
+      return null;
+    }
+
+    return (
         <section
           className="status-area"
           aria-live="polite"
@@ -1136,112 +1236,15 @@ function App() {
             </div>
           )}
         </section>
-      )}
+      );
+  }
 
-      <section className="collection-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">YOUR CARDS</p>
-            <h2>Collection</h2>
-          </div>
-
-          <div className="collection-heading-actions">
-            <div className="collection-meta">
-              <span>
-                Missing owned value:{" "}
-                <strong>
-                  {collection.summary
-                    ?.items_missing_owned_value || 0}
-                </strong>
-              </span>
-            </div>
-
-            <div className="range-tabs" role="group" aria-label="Collection view">
-              {[
-                { key: "table", label: "Table" },
-                { key: "gallery", label: "Gallery" },
-              ].map(({ key, label }) => (
-                <button
-                  type="button"
-                  key={key}
-                  className={collectionView === key ? "active" : ""}
-                  aria-pressed={collectionView === key}
-                  onClick={() => setCollectionView(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {!loadingCollection && collection.items.length > 0 && (
-          <div className="collection-search">
-            <input
-              type="search"
-              value={collectionQuery}
-              onChange={(event) =>
-                setCollectionQuery(event.target.value)
-              }
-              placeholder="Search your collection by name, set, number, grade..."
-              aria-label="Search your collection"
-            />
-
-            {collectionQuery.trim() && (
-              <span>
-                Showing {filteredItems.length} of{" "}
-                {collection.items.length}
-              </span>
-            )}
-          </div>
-        )}
-
-        {loadingCollection ? (
-          <div className="empty-state">
-            Loading collection…
-          </div>
-        ) : collection.items.length === 0 ? (
-          <div className="empty-state">
-            Search for a card above and add your first card.
-          </div>
-        ) : collectionView === "gallery" ? (
-          <div
-            className="collection-gallery"
-            hidden={filteredItems.length === 0}
-          >
-            {sortedItems.map((item) => (
-              <article className="gallery-card" key={item.id}>
-                {item.card.image_url || slabPhoto(item) ? (
-                  <ItemImage
-                    item={item}
-                    onClick={() => openZoom(item.card, ownedDetails(item))}
-                  />
-                ) : (
-                  <div className="gallery-placeholder">No image</div>
-                )}
-
-                <strong className="gallery-title">
-                  {cardTitle(item.card)}
-                </strong>
-
-                <span className="gallery-value">
-                  {money(item.owned_market_value_total)}
-                </span>
-
-                <span className="gallery-grade">
-                  {gradeLabel(item.ownership_grade)}
-                  {variantLabel(item.card.variant)
-                    ? ` · ${variantLabel(item.card.variant)}`
-                    : ""}
-                  {item.quantity > 1 ? ` · Qty ${item.quantity}` : ""}
-                </span>
-              </article>
-            ))}
-          </div>
-        ) : (
+  // The collection table, for the main collection or the small hits.
+  function renderTable(rows) {
+    return (
           <div
             className="collection-scroll"
-            hidden={filteredItems.length === 0}
+            hidden={rows.length === 0}
           >
             <table className="collection-table">
               <thead>
@@ -1286,7 +1289,7 @@ function App() {
               </thead>
 
               <tbody>
-                {sortedItems.map((item) => (
+                {rows.map((item) => (
                   <tr key={item.id}>
                     <td>
                       <div className="table-card-cell">
@@ -1460,10 +1463,192 @@ function App() {
               </tbody>
             </table>
           </div>
+    );
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="hero">
+        <div className="portfolio-card">
+          <div className="portfolio-card-copy">
+            <span>Known collection value</span>
+
+            <strong>{money(ownedTotal)}</strong>
+
+            <small>
+              {collection.summary?.item_count || 0} collection entries ·
+              Small Hits {money(collection.summary?.small_hits_total || 0)}
+            </small>
+          </div>
+
+          <button
+            type="button"
+            className="small-hits-button desktop-only"
+            onClick={openSmallHits}
+          >
+            Small Hits
+          </button>
+        </div>
+      </section>
+
+      <Dashboard
+        refreshKey={dashboardVersion}
+        actions={
+          <div className="refresh-control">
+            <div className="refresh-buttons">
+              <button
+                type="button"
+                className="sync-button primary"
+                onClick={handleSyncNow}
+                disabled={syncing}
+              >
+                {syncing && !gradedRunning && !smallHitsRunning ? "Syncing…" : "Refresh Prices"}
+              </button>
+
+              <button
+                type="button"
+                className="sync-button"
+                onClick={handleGradedRefresh}
+                disabled={syncing}
+              >
+                {gradedRunning ? "Refreshing…" : "Refresh Graded Cards"}
+              </button>
+            </div>
+
+            <small>{refreshStatusText(refreshStatus)}</small>
+            <small>{gradedRefreshText(refreshStatus)}</small>
+          </div>
+        }
+      />
+
+      <section className="search-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">ADD A CARD</p>
+            <h2>Search Pokémon cards</h2>
+          </div>
+
+        </div>
+
+        {!smallHitsMounted && renderCardSearch()}
+      </section>
+
+      {!smallHitsMounted && renderStatus()}
+
+      <section className="collection-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">YOUR CARDS</p>
+            <h2>Collection</h2>
+          </div>
+
+          <div className="collection-heading-actions">
+            <button
+              type="button"
+              className="small-hits-button mobile-only"
+              onClick={openSmallHits}
+            >
+              Small Hits
+            </button>
+
+            <div className="collection-meta">
+              <span>
+                Missing owned value:{" "}
+                <strong>
+                  {collection.summary
+                    ?.items_missing_owned_value || 0}
+                </strong>
+              </span>
+            </div>
+
+            <div className="range-tabs" role="group" aria-label="Collection view">
+              {[
+                { key: "table", label: "Table" },
+                { key: "gallery", label: "Gallery" },
+              ].map(({ key, label }) => (
+                <button
+                  type="button"
+                  key={key}
+                  className={collectionView === key ? "active" : ""}
+                  aria-pressed={collectionView === key}
+                  onClick={() => setCollectionView(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {!loadingCollection && regularItems.length > 0 && (
+          <div className="collection-search">
+            <input
+              type="search"
+              value={collectionQuery}
+              onChange={(event) =>
+                setCollectionQuery(event.target.value)
+              }
+              placeholder="Search your collection by name, set, number, grade..."
+              aria-label="Search your collection"
+            />
+
+            {collectionQuery.trim() && (
+              <span>
+                Showing {filteredItems.length} of{" "}
+                {regularItems.length}
+              </span>
+            )}
+          </div>
+        )}
+
+        {loadingCollection ? (
+          <div className="empty-state">
+            Loading collection…
+          </div>
+        ) : regularItems.length === 0 ? (
+          <div className="empty-state">
+            Search for a card above and add your first card.
+          </div>
+        ) : collectionView === "gallery" ? (
+          <div
+            className="collection-gallery"
+            hidden={filteredItems.length === 0}
+          >
+            {sortedItems.map((item) => (
+              <article className="gallery-card" key={item.id}>
+                {item.card.image_url || slabPhoto(item) ? (
+                  <ItemImage
+                    item={item}
+                    onClick={() => openZoom(item.card, ownedDetails(item))}
+                  />
+                ) : (
+                  <div className="gallery-placeholder">No image</div>
+                )}
+
+                <strong className="gallery-title">
+                  {cardTitle(item.card)}
+                </strong>
+
+                <span className="gallery-value">
+                  {money(item.owned_market_value_total)}
+                </span>
+
+                <span className="gallery-grade">
+                  {gradeLabel(item.ownership_grade)}
+                  {variantLabel(item.card.variant)
+                    ? ` · ${variantLabel(item.card.variant)}`
+                    : ""}
+                  {item.quantity > 1 ? ` · Qty ${item.quantity}` : ""}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          renderTable(sortedItems)
         )}
 
         {!loadingCollection &&
-          collection.items.length > 0 &&
+          regularItems.length > 0 &&
           filteredItems.length === 0 && (
             <div className="empty-state">
               No cards in your collection match "
@@ -1471,6 +1656,68 @@ function App() {
             </div>
           )}
       </section>
+
+      {smallHitsMounted && (
+        <div
+          className={`modal-backdrop small-hits-backdrop ${smallHitsShown ? "open" : ""}`}
+          onClick={closeSmallHits}
+        >
+          <section
+            className="small-hits-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Small Hits"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="small-hits-header">
+              <div>
+                <p className="eyebrow">SMALL HITS</p>
+                <h2>{money(collection.summary?.small_hits_total || 0)}</h2>
+                <span>
+                  {smallHitItems.length} {smallHitItems.length === 1 ? "card" : "cards"} ·
+                  {refreshStatus?.small_hits?.finished_at
+                    ? ` last synced ${pullTime(refreshStatus.small_hits.finished_at)}`
+                    : " not synced here yet"}
+                </span>
+              </div>
+
+              <div className="small-hits-actions">
+                <button
+                  type="button"
+                  className="sync-button primary"
+                  onClick={handleSmallHitsSync}
+                  disabled={syncing || smallHitItems.length === 0}
+                >
+                  {smallHitsRunning ? "Syncing…" : "SYNC SMALL HITS"}
+                </button>
+
+                <button
+                  type="button"
+                  className="close-button"
+                  aria-label="Close Small Hits"
+                  onClick={closeSmallHits}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="small-hits-body">
+              {renderStatus()}
+
+              <div className="small-hits-search">{renderCardSearch()}</div>
+
+              {smallHitItems.length === 0 ? (
+                <div className="empty-state">
+                  Search for a card above to add your first small hit.
+                </div>
+              ) : (
+                renderTable(sortedSmallHits)
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {addForm.card && (
         <div className="modal-backdrop">
@@ -1481,7 +1728,7 @@ function App() {
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">
-                  ADD TO COLLECTION
+                  {addForm.smallHit ? "ADD TO SMALL HITS" : "ADD TO COLLECTION"}
                 </p>
 
                 <h2>

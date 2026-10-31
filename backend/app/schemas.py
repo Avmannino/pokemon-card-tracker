@@ -38,6 +38,9 @@ class AddCollectionRequest(BaseModel):
     variant_confirmed: bool = False
     # Other variants of the same printing seen in the search results.
     variant_siblings: list[VariantOption] | None = None
+    # Added from the Small Hits drawer: kept out of the main table and the
+    # regular syncs (see price_sync).
+    small_hit: bool = False
 
 
 class VariantChangeRequest(BaseModel):

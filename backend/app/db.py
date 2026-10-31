@@ -195,6 +195,7 @@ def add_collection_item(
     ownership_grade: str,
     purchase_price: float | None,
     notes: str | None,
+    small_hit: bool = False,
 ) -> dict[str, Any]:
     payload = {
         "card_id": card_id,
@@ -203,6 +204,10 @@ def add_collection_item(
         "purchase_price": purchase_price,
         "notes": notes,
     }
+    # Only sent when set, so adding regular cards works before
+    # supabase/migrations/2026-10-30_small_hits.sql is run.
+    if small_hit:
+        payload["small_hit"] = True
     response = _client().table("collection_items").insert(payload).execute()
     return response.data[0]
 

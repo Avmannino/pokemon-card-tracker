@@ -199,11 +199,26 @@ def _new_pricecharting_record() -> dict[str, Any]:
     }
 
 
-def _card_ids_for_pull(limit: int) -> tuple[list[str], int]:
+def _card_ids_for_pull(limit: int, small_hits: bool = False) -> tuple[list[str], int]:
     """(unique card ids to pull, how many were left out by `limit`). A card
-    held in several collection rows is pulled once."""
+    held in several collection rows is pulled once.
+
+    Small hits (cards in the Small Hits drawer) are only pulled by the
+    small-hits sync (`small_hits=True`), and that sync pulls nothing else. A
+    card you also hold outside Small Hits is priced by the regular syncs."""
     items = db.get_collection_items()
-    unique_card_ids = list(dict.fromkeys(item["card_id"] for item in items))
+    regular = {item["card_id"] for item in items if not item.get("small_hit")}
+
+    if small_hits:
+        card_ids = [
+            item["card_id"]
+            for item in items
+            if item.get("small_hit") and item["card_id"] not in regular
+        ]
+    else:
+        card_ids = [item["card_id"] for item in items if not item.get("small_hit")]
+
+    unique_card_ids = list(dict.fromkeys(card_ids))
     return unique_card_ids[:limit], max(0, len(unique_card_ids) - limit)
 
 
@@ -215,7 +230,9 @@ def _graded_card_ids_for_pull(limit: int) -> tuple[list[str], int, int]:
     so PSA prices for raw cards would go unused. And a grade you priced
     yourself (typed in or from PriceCharting) always overrides TCGGO."""
     graded = [
-        item for item in db.get_collection_items() if item["ownership_grade"] != "RAW"
+        item
+        for item in db.get_collection_items()
+        if item["ownership_grade"] != "RAW" and not item.get("small_hit")
     ]
     card_ids = list(dict.fromkeys(item["card_id"] for item in graded))
 
@@ -251,7 +268,10 @@ def _note(record: dict[str, Any], card: dict[str, Any], problem: str) -> None:
     ]
 
 
-async def _pull_raw(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
+async def _pull_raw(
+    record: dict[str, Any],
+    small_hits: bool = False,
+) -> dict[str, dict[str, Any]]:
     """Pulls raw prices for every card in the collection, counting results
     into `record`. Returns each card's variant siblings (for the graded pull).
 
@@ -259,7 +279,7 @@ async def _pull_raw(record: dict[str, Any]) -> dict[str, dict[str, Any]]:
     every variant of those printings; each card is then matched to its exact
     PokeTrace id and variant. A card missing from the batch is looked up on
     its own; a sibling variant is never used in its place."""
-    card_ids, record["skipped"] = _card_ids_for_pull(MAX_CARDS_PER_PULL)
+    card_ids, record["skipped"] = _card_ids_for_pull(MAX_CARDS_PER_PULL, small_hits)
     cards = db.get_cards(card_ids)
     ordered = [cards[card_id] for card_id in card_ids if card_id in cards]
     _progress.update(phase="raw", done=0, total=len(ordered))
@@ -388,6 +408,7 @@ async def _pull_pricecharting(record: dict[str, Any]) -> None:
         item
         for item in db.get_collection_items()
         if item["ownership_grade"] in pricecharting.GRADE_LABELS
+        and not item.get("small_hit")
     ]
     owned: dict[str, set[str]] = {}
     for item in items:
@@ -813,6 +834,52 @@ def last_finished_syncs() -> list[dict[str, Any]]:
     return sorted(finished, key=lambda sync: datetime.fromisoformat(sync["started_at"]))
 
 
+def start_small_hits_sync() -> None:
+    """Prices the cards in the Small Hits drawer, in the background. Only
+    the SYNC SMALL HITS button starts this; no scheduled or other sync
+    prices them. Raises SyncBusy if any sync is already running."""
+    if _progress["running"] or _sync_lock.locked():
+        raise SyncBusy("A price sync is already running.")
+
+    # Claimed now, before the task gets to run, so a second click can't slip
+    # in between.
+    _progress.update(running=True, kind="small_hits", phase="raw", done=0, total=0)
+
+    task = asyncio.create_task(_small_hits_sync())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _small_hits_sync() -> None:
+    try:
+        async with _syncing("small_hits"):
+            record: dict[str, Any] = {
+                "started_at": _now().isoformat(),
+                "finished_at": None,
+                "error": None,
+                **_new_raw_record(),
+            }
+
+            state = _read_state() or {}
+            state["small_hits"] = record
+            _write_state(state)
+
+            try:
+                await _pull_raw(record, small_hits=True)
+            except Exception as exc:
+                logger.exception("Small hits sync failed")
+                record["error"] = f"{type(exc).__name__}: {exc}"
+
+            record["finished_at"] = _now().isoformat()
+            state = _read_state() or {}
+            state["small_hits"] = record
+            _write_state(state)
+
+            await _rebuild_cache()
+    finally:
+        _progress.update(running=False, phase=None)
+
+
 def get_status() -> dict[str, Any]:
     state = _read_state() or {}
     manual = state.get("manual")
@@ -850,6 +917,7 @@ def get_status() -> dict[str, Any]:
         "graded": state.get("graded"),
         "manual": manual,
         "pricecharting": state.get("pricecharting"),
+        "small_hits": state.get("small_hits"),
         "syncing": _progress["running"],
         "progress": dict(_progress) if _progress["running"] else None,
         "manual_available_in": _manual_cooldown_remaining(),

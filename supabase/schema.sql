@@ -152,3 +152,8 @@ where previous_value is distinct from value
    or newest_first = 1;
 
 revoke all on public.price_changes from anon, authenticated;
+
+-- Small Hits (also in supabase/migrations/2026-10-30_small_hits.sql):
+-- cards kept out of the main table and the regular syncs.
+alter table public.collection_items
+    add column if not exists small_hit boolean not null default false;

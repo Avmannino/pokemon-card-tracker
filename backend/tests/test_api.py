@@ -49,11 +49,12 @@ class FakeDB:
         self.cards[row["id"]] = row
         return row
 
-    def add_collection_item(self, card_id, quantity, ownership_grade, purchase_price, notes):
+    def add_collection_item(self, card_id, quantity, ownership_grade, purchase_price, notes, small_hit=False):
         item = {
             "id": f"item-{next(self.ids)}", "card_id": card_id, "quantity": quantity,
             "ownership_grade": ownership_grade, "purchase_price": purchase_price,
             "notes": notes, "created_at": self._now(), "variant_confirmed_at": None,
+            "small_hit": small_hit,
         }
         self.items[item["id"]] = item
         return item

@@ -103,6 +103,14 @@ export function startGradedRefresh() {
   });
 }
 
+// Prices the cards in the Small Hits drawer in the background; only ever
+// started by its SYNC SMALL HITS button.
+export function startSmallHitsSync() {
+  return request("/api/refresh-small-hits", {
+    method: "POST",
+  });
+}
+
 export function saveGradedValues(cardId, payload) {
   return request(`/api/cards/${cardId}/graded-values`, {
     method: "POST",
