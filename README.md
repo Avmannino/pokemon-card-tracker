@@ -317,7 +317,10 @@ The app will calculate the median of the newest value from each source.
 PriceCharting card page, **Refresh Graded Cards** re-reads that page for the
 grade you own
 (PSA 8 → "Grade 8", PSA 9 → "Grade 9", PSA 10 → "PSA 10") and replaces your
-price with it. The collection then shows **PriceCharting** instead of
+price with it. The value is the median of that grade's most recent sales on the
+page (up to 7 from the last 90 days), which keeps up with a moving market
+better than PriceCharting's own average; with fewer than 3 recent sales,
+PriceCharting's average is used. The collection then shows **PriceCharting** instead of
 **Manual**.
 
 ## Slab photos
