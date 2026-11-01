@@ -488,9 +488,9 @@ function SyncChanges({ title, syncedLabel, notYet, section, onZoom }) {
   );
 }
 
-// What the latest syncs changed: raw cards from the last price sync on the
-// left, graded cards from the last graded refresh on the right. Running one
-// kind of sync never clears the other's list.
+// What the latest syncs changed: raw cards from the last price sync, graded
+// cards from the last graded refresh and small hits from the last small hits
+// sync, side by side. Running one kind of sync never clears another's list.
 function SyncSummary({ sync, onZoom }) {
   return (
     <section className="sync-summary-panel">
@@ -510,6 +510,14 @@ function SyncSummary({ sync, onZoom }) {
           syncedLabel="Graded cards refreshed"
           notYet="No graded refresh has finished yet."
           section={sync?.graded}
+          onZoom={onZoom}
+        />
+
+        <SyncChanges
+          title="Small hits"
+          syncedLabel="Small hits synced"
+          notYet="No small hits sync has finished yet."
+          section={sync?.small_hits}
           onZoom={onZoom}
         />
       </div>

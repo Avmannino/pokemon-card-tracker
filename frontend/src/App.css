@@ -684,12 +684,12 @@ h2 {
   margin-top: 20px;
 }
 
-/* Raw cards (last price sync) on the left, graded cards (last graded
-   refresh) on the right. */
+/* Raw cards (last price sync), graded cards (last graded refresh) and
+   small hits (last small hits sync), side by side; stacked when narrow. */
 .sync-sections {
   display: grid;
 
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 
   gap: 24px;
 }
@@ -2336,6 +2336,19 @@ a.manual-source-link:hover {
       1fr;
   }
 
+  /* Last Syncs' three lists stack. */
+  .sync-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-section + .sync-section {
+    padding-top: 18px;
+    padding-left: 0;
+
+    border-top: 1px solid #1c232f;
+    border-left: 0;
+  }
+
   .search-results {
     grid-template-columns:
       1fr;
@@ -2386,17 +2399,8 @@ a.manual-source-link:hover {
   }
 
   .performance-row,
-  .movers-split,
-  .sync-sections {
+  .movers-split {
     grid-template-columns: 1fr;
-  }
-
-  .sync-section + .sync-section {
-    padding-top: 18px;
-    padding-left: 0;
-
-    border-top: 1px solid #1c232f;
-    border-left: 0;
   }
 
   .chart-card,

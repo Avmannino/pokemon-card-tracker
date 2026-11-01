@@ -567,9 +567,10 @@ def _sync_changes(
     syncs: list[dict[str, Any]] | None,
     now: datetime,
 ) -> dict[str, Any] | None:
-    """What the latest syncs changed, in two lists that never replace each
-    other: "prices" (raw cards, from the last price sync) and "graded"
-    (graded cards, from the last Refresh Graded Cards). Each is None until
+    """What the latest syncs changed, in lists that never replace each
+    other: "prices" (raw cards, from the last price sync), "graded" (graded
+    cards, from the last Refresh Graded Cards) and "small_hits" (from the
+    last SYNC SMALL HITS, which prices only small hits). Each is None until
     that kind of sync has finished; the whole result is None before any."""
     if not syncs:
         return None
@@ -588,6 +589,9 @@ def _sync_changes(
         "graded": _changes_in_sync(
             held, snapshots_by_card, latest.get("graded"), now, graded=True
         ),
+        "small_hits": _changes_in_sync(
+            held, snapshots_by_card, latest.get("small_hits"), now, graded=None
+        ),
     }
 
 
@@ -596,10 +600,10 @@ def _changes_in_sync(
     snapshots_by_card: dict[str, list[dict[str, Any]]],
     sync: dict[str, Any] | None,
     now: datetime,
-    graded: bool,
+    graded: bool | None,
 ) -> dict[str, Any] | None:
-    """Every raw (or graded) card you hold whose price `sync` changed,
-    largest move first.
+    """Every raw (graded=False), graded (True) or any (None) card you hold
+    whose price `sync` changed, largest move first.
 
     A sync's prices are the rows saved while it ran (created_at - a
     PokeTrace row's observed_at is when PokeTrace last updated it, which can
@@ -617,7 +621,7 @@ def _changes_in_sync(
 
     changes = []
     for (card_id, grade), group in held.items():
-        if (grade != "RAW") != graded:
+        if graded is not None and (grade != "RAW") != graded:
             continue
 
         rows = [row for row in snapshots_by_card.get(card_id, []) if row.get("grade") == grade]

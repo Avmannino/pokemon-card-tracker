@@ -883,8 +883,8 @@ async def _graded_refresh() -> None:
 def last_finished_syncs() -> list[dict[str, Any]]:
     """The most recent finished sync of each kind, oldest first, each as
     {"kind", "started_at", "finished_at"}: "prices" for Refresh Prices
-    (which the scheduled GitHub Action also runs) and "graded" for Refresh
-    Graded Cards. Empty before the first; a sync still running isn't
+    (which the scheduled GitHub Action also runs), "graded" for Refresh
+    Graded Cards and "small_hits" for SYNC SMALL HITS. Empty before the first; a sync still running isn't
     counted until it finishes."""
     state = _read_state() or {}
     finished = [
@@ -896,6 +896,7 @@ def last_finished_syncs() -> list[dict[str, Any]]:
         for kind, record in (
             ("prices", state.get("manual")),
             ("graded", state.get("pricecharting")),
+            ("small_hits", state.get("small_hits")),
         )
         if record and record.get("started_at") and record.get("finished_at")
     ]
