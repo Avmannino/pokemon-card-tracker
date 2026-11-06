@@ -412,13 +412,7 @@ def evaluate(
             _component(
                 row, source_kind(row), _as_float(row.get("value")), "primary",
                 label=(
-                    f"PriceCharting {_meta(row).get('price_label')}"
-                    + (
-                        f", median of {_meta(row).get('sale_count')} recent sales"
-                        if _meta(row).get("price_basis") == "recent_sales"
-                        else ""
-                    )
-                    + " (auto-updated)"
+                    f"PriceCharting {_meta(row).get('price_label')} (auto-updated)"
                     if is_auto_refreshed(row)
                     else None
                 ),

@@ -459,9 +459,9 @@ async def _pull_pricecharting(record: dict[str, Any]) -> None:
 
         for card, grade, row in entries:
             label = pricecharting.GRADE_LABELS[grade]
-            entry = prices.get(grade)
+            price = prices.get(grade)
 
-            if entry is None:
+            if price is None:
                 record["no_price"] += 1
                 _note(record, card, f"PriceCharting has no {label} price.")
                 continue
@@ -470,18 +470,13 @@ async def _pull_pricecharting(record: dict[str, Any]) -> None:
                 card_id=card["id"],
                 grade=grade,
                 source=row["source"],
-                value=entry["value"],
+                value=price,
                 source_url=row.get("source_url"),
                 metadata={
                     "entry_method": "pricecharting",
                     "provider": "PriceCharting",
                     "price_label": label,
                     "page_url": url,
-                    # "recent_sales" (median of sale_count recent sales) or
-                    # "guide" (PriceCharting's guide price, too few sales).
-                    "price_basis": entry["basis"],
-                    "sale_count": entry["sale_count"],
-                    "guide_price": entry["guide"],
                 },
             )
             record["updated"] += 1

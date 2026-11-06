@@ -647,36 +647,6 @@ class PriceChartingPages(unittest.TestCase):
         self.assertIsNone(pricecharting.page_url("https://www.psacard.com/cardfacts/x"))
 
 
-class PriceChartingRecentSales(unittest.TestCase):
-    def test_median_of_recent_sales_and_guide_fallback(self):
-        from datetime import date
-
-        def sales_table(rows):
-            body = "".join(
-                f'<tr><td class="date">{day}</td><td><span class="js-price">${price}</span></td></tr>'
-                for day, price in rows
-            )
-            return f'<div class="completed-auctions-manual-only"><table>{body}</table></div>'
-
-        today = date(2026, 11, 1)
-        rising = sales_table([
-            ("2026-10-21", "630.00"), ("2026-10-17", "502.99"), ("2026-10-13", "1,136.78"),
-            ("2026-10-12", "500.00"), ("2026-10-09", "495.00"), ("2026-10-07", "365.00"),
-            ("2026-10-04", "380.00"), ("2026-09-30", "380.00"),
-        ])
-        values = pricecharting.parse_values(PRICE_GUIDE + rising, today)
-        # The 7 newest; the $1,136.78 one-off doesn't move the median.
-        self.assertEqual(values["PSA_10"]["value"], 500.0)
-        self.assertEqual(values["PSA_10"]["sale_count"], 7)
-        self.assertEqual(values["PSA_10"]["basis"], "recent_sales")
-
-        thin = sales_table([("2026-09-14", "120.00"), ("2026-08-02", "36.00")])
-        values = pricecharting.parse_values(PRICE_GUIDE + thin, today)
-        self.assertEqual(values["PSA_10"], {
-            "value": 1189.63, "basis": "guide", "sale_count": None, "guide": 1189.63,
-        })
-
-
 class PriceChartingRefresh(unittest.IsolatedAsyncioTestCase):
     async def test_only_the_owned_grade_is_updated_and_replaces_the_manual_price(self):
         url = "https://www.pricecharting.com/game/pokemon-vivid-voltage/lugia-132?q=lugia"
@@ -696,10 +666,7 @@ class PriceChartingRefresh(unittest.IsolatedAsyncioTestCase):
 
         async def fake_prices(page):
             fetched.append(page)
-            return {
-                grade: {"value": value, "basis": "recent_sales", "sale_count": 7, "guide": value}
-                for grade, value in {"PSA_8": 14.0, "PSA_9": 19.5, "PSA_10": 189.63}.items()
-            }
+            return {"PSA_8": 14.0, "PSA_9": 19.5, "PSA_10": 189.63}
 
         patches = [
             mock.patch.object(price_sync.db, "get_collection_items", lambda: items),
