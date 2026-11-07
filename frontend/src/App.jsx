@@ -218,15 +218,11 @@ function ChangeCell({ change, window }) {
   return (
     <span className={`change-cell ${direction}`} title={title}>
       <strong>
-        {change.change_pct !== null
-          ? percent(change.change_pct)
-          : `${change.change < 0 ? "−" : "+"}${money(Math.abs(change.change))}`}
-      </strong>
-
-      <span>
         {change.change < 0 ? "−" : "+"}
         {money(Math.abs(change.change))}
-      </span>
+      </strong>
+
+      {change.change_pct !== null && <span>{percent(change.change_pct)}</span>}
     </span>
   );
 }
@@ -283,7 +279,7 @@ const COLLECTION_COLUMNS = [
 function sortValue(item, key) {
   if (key.startsWith("change_")) {
     const change = item.owned_grade_changes?.[key.slice(7)];
-    return change?.has_history ? change.change_pct ?? change.change : null;
+    return change?.has_history ? change.change : null;
   }
 
   switch (key) {
