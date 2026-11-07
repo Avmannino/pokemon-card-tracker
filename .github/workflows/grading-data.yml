@@ -1,0 +1,114 @@
+name: Grading Opportunities Refresh
+
+# Twice a week, re-reads the PriceCharting page of every raw card you linked
+# (Small Hits left out) for Grading Opportunities' PSA 9 / PSA 10 prices.
+# It runs in the background on the backend; page loads never wait for it.
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # Mondays and Thursdays, between the 8:07 and 20:07 price syncs.
+    - cron: "37 10 * * 1,4"
+      timezone: "America/New_York"
+
+concurrency:
+  group: pokemon-grading-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-grading-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      BACKEND_URL: ${{ vars.BACKEND_URL }}
+
+    steps:
+      - name: Wake Render backend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            RESPONSE="$(curl -fsS --max-time 30 "$BACKEND_URL/health" || true)"
+
+            if echo "$RESPONSE" | grep -q '"status":"ok"'; then
+              echo "Backend is awake and healthy."
+              exit 0
+            fi
+
+            echo "Waiting for Render to wake... attempt $attempt/30"
+            sleep 10
+          done
+
+          echo "Backend did not become healthy."
+          exit 1
+
+      - name: Start grading data refresh
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Another sync may be running (they take turns); wait and retry.
+          for attempt in {1..20}; do
+            HTTP_STATUS="$(
+              curl -sS -o /dev/null -w "%{http_code}" -X POST \
+                "$BACKEND_URL/api/refresh-grading-data"
+            )"
+
+            echo "Refresh endpoint returned HTTP $HTTP_STATUS"
+
+            if [ "$HTTP_STATUS" = "202" ]; then
+              echo "Grading data refresh started."
+              exit 0
+            fi
+
+            if [ "$HTTP_STATUS" = "409" ]; then
+              echo "Another sync is running; retrying in 60s ($attempt/20)."
+              sleep 60
+              continue
+            fi
+
+            echo "Unexpected response from refresh endpoint."
+            exit 1
+          done
+
+          echo "Couldn't start: another sync stayed busy."
+          exit 1
+
+      - name: Keep Render awake until it finishes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..60}; do
+            BODY="$(curl -fsS --max-time 30 "$BACKEND_URL/api/refresh-status")"
+
+            SYNCING="$(
+              python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+          print("true" if data.get("syncing") else "false")
+          ' <<< "$BODY"
+            )"
+
+            if [ "$SYNCING" = "false" ]; then
+              echo "Grading data refresh finished."
+              python3 -c '
+          import json
+          import sys
+
+          print(json.dumps(json.load(sys.stdin).get("grading_data"), indent=2))
+          ' <<< "$BODY"
+              exit 0
+            fi
+
+            echo "Still refreshing... check $attempt/60"
+            sleep 30
+          done
+
+          echo "Timed out waiting for the refresh to finish."
+          exit 1

@@ -65,6 +65,15 @@ export function getGradingOpportunities(gradingCost = null) {
   return request(`/api/grading-opportunities${params}`);
 }
 
+// Links a raw card to its PriceCharting page for Grading Opportunities
+// (empty removes it); saving reads that page once.
+export function setPriceChartingLink(cardId, url) {
+  return request(`/api/cards/${cardId}/pricecharting-link`, {
+    method: "PUT",
+    body: JSON.stringify({ url: url || null }),
+  });
+}
+
 export function addCollectionItem(payload) {
   return request("/api/collection", {
     method: "POST",

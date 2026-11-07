@@ -123,6 +123,22 @@ def refresh_saved_cards(updates: list[tuple[dict[str, Any], dict[str, Any], dict
         ).execute()
 
 
+def set_pricecharting_link(card_id: str, url: str | None) -> None:
+    """A raw card's PriceCharting page (for Grading Opportunities), kept in
+    marketplace_urls; None removes it."""
+    card = get_card(card_id)
+    if not card:
+        return
+
+    urls = dict(card.get("marketplace_urls") or {})
+    if url:
+        urls["pricecharting_url"] = url
+    else:
+        urls.pop("pricecharting_url", None)
+
+    _client().table("cards").update({"marketplace_urls": urls}).eq("id", card_id).execute()
+
+
 def update_marketplace_urls(card_id: str, extra: dict[str, Any]) -> None:
     """Merge `extra` into a card's marketplace_urls (used to remember the
     TCGGO id so a sleeping/redeployed backend never has to look it up again)."""

@@ -23,6 +23,8 @@ For every grade, only the newest snapshot from each source counts. Then:
 from statistics import median
 from typing import Any
 
+from .pricecharting import page_url as pricecharting_page
+
 
 GRADES = ["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"]
 
@@ -117,6 +119,8 @@ def source_kind(row: dict[str, Any]) -> str:
         return meta.get("underlying_source") or "other"
     if provider == "TCGGO":
         return "tcggo"
+    if provider == "PriceCharting":
+        return "pricecharting_guide"
     return "other"
 
 
@@ -313,6 +317,34 @@ def _evaluate_generic(rows, components, empty_summary) -> dict[str, Any]:
 
 
 def _evaluate_graded(rows, grade, variant_ambiguous) -> dict[str, Any]:
+    # A raw card you linked to its PriceCharting page (for Grading
+    # Opportunities): that page's price for the grade is used, as for your
+    # graded cards. It's your page for this exact card, unlike TCGGO's
+    # product-wide sales.
+    guide_rows = [row for row in rows if source_kind(row) == "pricecharting_guide"]
+    if guide_rows:
+        row = max(guide_rows, key=lambda r: r.get("observed_at") or "")
+        value = _as_float(row.get("value"))
+        label = f"PriceCharting {_meta(row).get('price_label') or grade_label(grade)}"
+        return {
+            "estimate": round(value, 2) if value is not None else None,
+            "method": "pricecharting_guide",
+            "summary": f"{label} price from the page you linked.",
+            "confidence": "MEDIUM",
+            "divergence": None,
+            "divergent": False,
+            "components": [_component(row, "pricecharting_guide", value, "primary", label=label)]
+            + [
+                _component(
+                    other, source_kind(other), _as_float(other.get("value")), "excluded",
+                    "PriceCharting's price is used instead.",
+                )
+                for other in rows
+                if other is not row
+            ],
+            "used_values": [value] if value is not None else [],
+        }
+
     components = []
     usable = []
     reasons = []
@@ -487,6 +519,17 @@ def build_market_values(
     variant = (card or {}).get("variant")
     ambiguous = is_variant_ambiguous(card)
     result: dict[str, dict[str, Any]] = {}
+
+    # PriceCharting price-guide rows only count while the card is still
+    # linked to that page (a removed or corrected link drops them).
+    if card is not None:
+        link = pricecharting_page(((card.get("marketplace_urls") or {}).get("pricecharting_url")))
+        latest = {
+            key: row
+            for key, row in latest.items()
+            if source_kind(row) != "pricecharting_guide"
+            or (link is not None and _meta(row).get("page_url") == link)
+        }
 
     for grade in GRADES:
         sources = [row for (row_grade, _), row in latest.items() if row_grade == grade]

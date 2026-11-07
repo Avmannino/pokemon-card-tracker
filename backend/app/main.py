@@ -15,9 +15,10 @@ from .config import settings
 from .schemas import (
     AddCollectionRequest,
     GradedValuesRequest,
+    PriceChartingLinkRequest,
     VariantChangeRequest,
 )
-from .services import grading, poketrace, price_sync
+from .services import grading, poketrace, price_sync, pricecharting
 from .services.portfolio import build_dashboard, lot_price, value_changes
 from .services.valuation import (
     build_market_values,
@@ -279,7 +280,9 @@ def grading_opportunities(
     """Raw cards you own, ranked by grading upside. Reads stored prices
     only - opening the screen never calls a pricing API."""
     cost = settings.grading_cost if grading_cost is None else grading_cost
-    return grading.report(cache.get()["grading_inputs"], cost, settings.grading_cost)
+    result = grading.report(cache.get()["grading_inputs"], cost, settings.grading_cost)
+    result["last_refresh"] = price_sync.get_status().get("grading_data")
+    return result
 
 
 def _record_add_event(item: dict[str, Any]) -> None:
@@ -641,6 +644,57 @@ async def refresh_graded() -> dict[str, bool]:
     progress is reported by /api/refresh-status."""
     try:
         price_sync.start_graded_refresh()
+    except price_sync.SyncBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"started": True}
+
+
+@app.put("/api/cards/{card_id}/pricecharting-link")
+async def set_pricecharting_link(
+    card_id: str,
+    request: PriceChartingLinkRequest,
+) -> dict[str, Any]:
+    """Links a raw card to its PriceCharting page for Grading Opportunities
+    (or removes the link). Saving a link reads that one page right away, so
+    the card's PSA 9 / PSA 10 prices show without waiting for the next
+    twice-weekly refresh."""
+    card = db.get_card(card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found.")
+
+    url = None
+    if request.url and request.url.strip():
+        url = pricecharting.page_url(request.url)
+        if url is None:
+            raise HTTPException(
+                status_code=400,
+                detail="That isn't a PriceCharting card page (it should look like "
+                "https://www.pricecharting.com/game/...).",
+            )
+
+    db.set_pricecharting_link(card_id, url)
+
+    price_error = None
+    if url:
+        try:
+            if not await price_sync.pull_card_grading_prices(card_id, url):
+                price_error = "PriceCharting has no Grade 9 or PSA 10 price on that page."
+        except Exception as exc:
+            price_error = str(exc)
+            logger.exception("Reading the PriceCharting page for card %s failed", card_id)
+
+    return {"url": url, "price_error": price_error}
+
+
+@app.post("/api/refresh-grading-data", status_code=202)
+async def refresh_grading_data() -> dict[str, bool]:
+    """Re-reads the PriceCharting page of every linked raw card (Small Hits
+    left out) for Grading Opportunities, in the background. Run twice a
+    week by .github/workflows/grading-data.yml; progress is reported by
+    /api/refresh-status."""
+    try:
+        price_sync.start_grading_refresh()
     except price_sync.SyncBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

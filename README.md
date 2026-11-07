@@ -446,7 +446,12 @@ most dollars (price change x copies held).
 a PSA 9 would be worth over the raw card plus a grading cost ($30 by
 default; set `GRADING_COST` on the backend, or change it on the page). It
 only uses stored prices for the same card and variant, and shows "Graded
-pricing unavailable" otherwise. The score formula is in
+pricing unavailable" otherwise. Its PSA 9 / PSA 10 prices come from each raw
+card's PriceCharting page: add the link with **Add link** under View all
+(saving reads the page once), and the GitHub Action
+`.github/workflows/grading-data.yml` re-reads every linked page on Mondays
+and Thursdays in the background. Small Hits are left out. Cards without a
+link fall back to stored TCGGO prices. The score formula is in
 `backend/app/services/grading.py` and explained on the page. Market
 opportunity only; the actual grade depends on the card's condition.
 

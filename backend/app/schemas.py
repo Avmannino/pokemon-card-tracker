@@ -43,6 +43,11 @@ class AddCollectionRequest(BaseModel):
     small_hit: bool = False
 
 
+class PriceChartingLinkRequest(BaseModel):
+    # A raw card's PriceCharting page; empty removes the link.
+    url: str | None = Field(default=None, max_length=500)
+
+
 class VariantChangeRequest(BaseModel):
     # PokeTrace id of the variant you actually own; the card's current id
     # just confirms it.

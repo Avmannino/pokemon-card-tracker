@@ -904,6 +904,148 @@ def last_finished_syncs() -> list[dict[str, Any]]:
     return sorted(finished, key=lambda sync: datetime.fromisoformat(sync["started_at"]))
 
 
+# Source name for Grading Opportunities' PriceCharting prices (Grade 9 /
+# PSA 10 of raw cards you linked to their PriceCharting page).
+PRICE_GUIDE_SOURCE = "PriceCharting price guide"
+GRADING_GRADES = ("PSA_9", "PSA_10")
+
+
+def _grading_snapshot_rows(card_id: str, url: str, prices: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "card_id": card_id,
+            "grade": grade,
+            "source": PRICE_GUIDE_SOURCE,
+            "value": prices[grade],
+            "source_url": url,
+            "metadata": {
+                "provider": "PriceCharting",
+                "price_label": pricecharting.GRADE_LABELS[grade],
+                "page_url": url,
+            },
+        }
+        for grade in GRADING_GRADES
+        if prices.get(grade) is not None
+    ]
+
+
+async def pull_card_grading_prices(card_id: str, url: str) -> int:
+    """One raw card's Grade 9 / PSA 10 prices from its linked PriceCharting
+    page (when you save the link). Returns how many grades had a price."""
+    rows = _grading_snapshot_rows(card_id, url, await pricecharting.get_prices(url))
+    db.insert_price_snapshots(rows)
+    return len(rows)
+
+
+def _new_grading_record() -> dict[str, Any]:
+    return {
+        "attempted": 0,
+        "updated": 0,
+        "failed": 0,
+        "no_link": 0,
+        "stopped_early": None,
+        "issues": [],
+    }
+
+
+async def _pull_grading_data(record: dict[str, Any]) -> None:
+    """Grading Opportunities' prices: re-reads the PriceCharting page linked
+    to each raw card you own (Small Hits left out - grading them doesn't
+    pay), one request per card, and saves its Grade 9 and PSA 10 prices."""
+    items = [
+        item
+        for item in db.get_collection_items()
+        if item["ownership_grade"] == "RAW" and not item.get("small_hit")
+    ]
+    card_ids = list(dict.fromkeys(item["card_id"] for item in items))
+    cards = db.get_cards(card_ids)
+
+    targets = []
+    for card_id in card_ids:
+        card = cards.get(card_id)
+        url = pricecharting.page_url(
+            ((card or {}).get("marketplace_urls") or {}).get("pricecharting_url")
+        )
+        if url:
+            targets.append((card, url))
+        else:
+            record["no_link"] += 1
+
+    _progress.update(phase="grading", done=0, total=len(targets))
+    rows: list[dict[str, Any]] = []
+
+    try:
+        for index, (card, url) in enumerate(targets):
+            record["attempted"] += 1
+            try:
+                prices = await pricecharting.get_prices(url)
+            except pricecharting.PriceChartingBlocked as exc:
+                record["failed"] += 1
+                record["stopped_early"] = str(exc)
+                break
+            except Exception as exc:
+                logger.exception("PriceCharting lookup failed for %s", url)
+                record["failed"] += 1
+                _note(record, card, f"PriceCharting: {exc}")
+            else:
+                found = _grading_snapshot_rows(card["id"], url, prices)
+                rows.extend(found)
+                if found:
+                    record["updated"] += 1
+                else:
+                    _note(record, card, "PriceCharting has no Grade 9 or PSA 10 price.")
+
+            _progress["done"] = index + 1
+    finally:
+        # Saved together at the end (or wherever it stopped).
+        db.insert_price_snapshots(rows)
+
+
+def start_grading_refresh() -> None:
+    """Refreshes Grading Opportunities' PriceCharting prices in the
+    background. Started by the twice-weekly GitHub Action
+    (.github/workflows/grading-data.yml). Raises SyncBusy if any sync is
+    already running."""
+    if _progress["running"] or _sync_lock.locked():
+        raise SyncBusy("A price sync is already running.")
+
+    _progress.update(running=True, kind="grading_data", phase="grading", done=0, total=0)
+
+    task = asyncio.create_task(_grading_refresh())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _grading_refresh() -> None:
+    try:
+        async with _syncing("grading_data"):
+            record: dict[str, Any] = {
+                "started_at": _now().isoformat(),
+                "finished_at": None,
+                "error": None,
+                **_new_grading_record(),
+            }
+
+            state = _read_state() or {}
+            state["grading_data"] = record
+            _write_state(state)
+
+            try:
+                await _pull_grading_data(record)
+            except Exception as exc:
+                logger.exception("Grading data refresh failed")
+                record["error"] = f"{type(exc).__name__}: {exc}"
+
+            record["finished_at"] = _now().isoformat()
+            state = _read_state() or {}
+            state["grading_data"] = record
+            _write_state(state)
+
+            await _rebuild_cache()
+    finally:
+        _progress.update(running=False, phase=None)
+
+
 def start_small_hits_sync() -> None:
     """Prices the cards in the Small Hits drawer, in the background. Only
     the SYNC SMALL HITS button starts this; no scheduled or other sync
@@ -990,6 +1132,7 @@ def get_status() -> dict[str, Any]:
         "manual": manual,
         "pricecharting": state.get("pricecharting"),
         "small_hits": state.get("small_hits"),
+        "grading_data": state.get("grading_data"),
         "syncing": _progress["running"],
         "progress": dict(_progress) if _progress["running"] else None,
         "manual_available_in": _manual_cooldown_remaining(),

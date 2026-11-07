@@ -6,7 +6,9 @@ Run from backend/:  python -m unittest discover -t . -s tests -v
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from app.services import grading
+from unittest import mock
+
+from app.services import grading, price_sync, pricecharting
 from app.services.portfolio import Lot, Performance, PriceSeries
 from app.services.valuation import build_market_values
 
@@ -212,6 +214,73 @@ class GradingOpportunities(unittest.TestCase):
         )
         self.assertEqual([row["card"]["id"] for row in report["opportunities"]], ["some", "none"])
         self.assertEqual(report["available"], 1)
+
+
+class PriceChartingGradingPrices(unittest.TestCase):
+    LINK = "https://www.pricecharting.com/game/pokemon-astral-radiance/hoothoot-tg12"
+
+    def snapshots(self):
+        return [
+            {"grade": "PSA_10", "source": price_sync.PRICE_GUIDE_SOURCE, "value": 410.0,
+             "observed_at": at(1).isoformat(),
+             "metadata": {"provider": "PriceCharting", "price_label": "PSA 10", "page_url": self.LINK}},
+            {"grade": "PSA_10", "source": "eBay graded sold median (via TCGGO)", "value": 400.0,
+             "observed_at": at(0).isoformat(), "metadata": {"provider": "TCGGO", "sample_size": 4}},
+        ]
+
+    def card(self, link):
+        return {"id": "c1", "name": "Hoothoot", "variant": "Holofoil",
+                "marketplace_urls": {"pricecharting_url": link} if link else {}}
+
+    def test_linked_page_is_used_over_tcggo(self):
+        values = build_market_values(self.snapshots(), self.card(self.LINK + "?q=hoothoot"))
+        self.assertEqual(values["PSA_10"]["estimate"], 410.0)
+        self.assertEqual(values["PSA_10"]["method"], "pricecharting_guide")
+
+    def test_prices_from_a_removed_or_changed_link_are_ignored(self):
+        for link in (None, "https://www.pricecharting.com/game/pokemon-x/other-1"):
+            values = build_market_values(self.snapshots(), self.card(link))
+            self.assertEqual(values["PSA_10"]["estimate"], 400.0)  # back to TCGGO
+
+    def test_small_hits_are_left_out(self):
+        items = [{"id": "a", "card": {"id": "c1", "name": "c1"}, "ownership_grade": "RAW",
+                  "quantity": 1, "small_hit": True, "market_values": {}}]
+        self.assertEqual(grading.inputs_from_collection(items), [])
+
+
+class GradingDataRefresh(unittest.IsolatedAsyncioTestCase):
+    async def test_reads_each_linked_raw_card_once(self):
+        link = "https://www.pricecharting.com/game/pokemon-astral-radiance/hoothoot-tg12"
+        items = [
+            {"id": "i1", "card_id": "linked", "ownership_grade": "RAW"},
+            {"id": "i2", "card_id": "linked", "ownership_grade": "RAW"},
+            {"id": "i3", "card_id": "unlinked", "ownership_grade": "RAW"},
+            {"id": "i4", "card_id": "small", "ownership_grade": "RAW", "small_hit": True},
+            {"id": "i5", "card_id": "graded", "ownership_grade": "PSA_10"},
+        ]
+        cards = {
+            "linked": {"id": "linked", "marketplace_urls": {"pricecharting_url": link + "?q=x"}},
+            "unlinked": {"id": "unlinked", "marketplace_urls": {}},
+            "small": {"id": "small", "marketplace_urls": {"pricecharting_url": link}},
+            "graded": {"id": "graded", "marketplace_urls": {"pricecharting_url": link}},
+        }
+        fetched, inserted = [], []
+
+        async def fake_prices(url):
+            fetched.append(url)
+            return {"PSA_8": 150.0, "PSA_9": 164.03, "PSA_10": 400.0}
+
+        with mock.patch.object(price_sync.db, "get_collection_items", lambda: items), \
+             mock.patch.object(price_sync.db, "get_cards", lambda ids: {i: cards[i] for i in ids}), \
+             mock.patch.object(price_sync.db, "insert_price_snapshots", lambda rows: inserted.extend(rows)), \
+             mock.patch.object(pricecharting, "get_prices", fake_prices):
+            record = price_sync._new_grading_record()
+            await price_sync._pull_grading_data(record)
+
+        self.assertEqual(fetched, [link])
+        self.assertEqual(sorted(row["grade"] for row in inserted), ["PSA_10", "PSA_9"])
+        self.assertEqual({row["card_id"] for row in inserted}, {"linked"})
+        self.assertEqual((record["updated"], record["no_link"]), (1, 1))
 
 
 if __name__ == "__main__":

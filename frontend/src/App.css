@@ -3416,3 +3416,20 @@ a.manual-source-link:hover {
     grid-template-columns: 58px minmax(0, 1fr) 84px;
   }
 }
+
+.grading-link-cell {
+  white-space: nowrap;
+}
+
+.grading-link-cell a {
+  margin-right: 8px;
+
+  color: #8fb0ff;
+
+  font-size: 0.78rem;
+}
+
+.grading-panel .status,
+.grading-modal .status {
+  margin-bottom: 12px;
+}

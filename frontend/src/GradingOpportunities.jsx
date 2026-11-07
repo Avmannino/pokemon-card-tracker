@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { getGradingOpportunities } from "./api.js";
+import { getGradingOpportunities, setPriceChartingLink } from "./api.js";
 import { cardTitle, money, variantLabel } from "./format.js";
 
 // Your grading cost per card, remembered on this device. Unset = the
@@ -100,7 +100,28 @@ function LabelPill({ row }) {
   );
 }
 
-function OpportunityTable({ rows, onZoom }) {
+function LinkCell({ row, onEditLink }) {
+  return (
+    <td className="grading-link-cell" onClick={(event) => event.stopPropagation()}>
+      {row.pricecharting_url ? (
+        <>
+          <a href={row.pricecharting_url} target="_blank" rel="noreferrer">
+            Linked ↗
+          </a>
+          <button type="button" className="text-button" onClick={() => onEditLink(row)}>
+            Edit
+          </button>
+        </>
+      ) : (
+        <button type="button" className="text-button" onClick={() => onEditLink(row)}>
+          Add link
+        </button>
+      )}
+    </td>
+  );
+}
+
+function OpportunityTable({ rows, onZoom, onEditLink }) {
   return (
     <div className="collection-scroll">
       <table className="collection-table grading-table">
@@ -114,6 +135,7 @@ function OpportunityTable({ rows, onZoom }) {
             <th>PSA 10 net</th>
             <th>PSA 9 net</th>
             <th>Score</th>
+            <th>PriceCharting</th>
           </tr>
         </thead>
 
@@ -171,6 +193,8 @@ function OpportunityTable({ rows, onZoom }) {
                   {row.unavailable_reason}
                 </td>
               )}
+
+              <LinkCell row={row} onEditLink={onEditLink} />
             </tr>
           ))}
         </tbody>
@@ -187,6 +211,13 @@ function GradingOpportunities({ refreshKey, onZoom }) {
   const [cost, setCost] = useState(savedCost);
   const [costDraft, setCostDraft] = useState("");
   const [showAll, setShowAll] = useState(false);
+  // The card whose PriceCharting link is being edited.
+  const [linkRow, setLinkRow] = useState(null);
+  const [linkDraft, setLinkDraft] = useState("");
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkError, setLinkError] = useState("");
+  const [linkMessage, setLinkMessage] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const [sortKey, setSortKey] = useState("score");
   const [filters, setFilters] = useState({
     minPsa10: "",
@@ -213,7 +244,7 @@ function GradingOpportunities({ refreshKey, onZoom }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, cost]);
+  }, [refreshKey, cost, reloadKey]);
 
   useEffect(() => {
     if (!showAll) {
@@ -268,6 +299,35 @@ function GradingOpportunities({ refreshKey, onZoom }) {
     setCost(value);
   }
 
+  function editLink(row) {
+    setLinkRow(row);
+    setLinkDraft(row.pricecharting_url || "");
+    setLinkError("");
+  }
+
+  async function saveLink(url) {
+    setLinkSaving(true);
+    setLinkError("");
+
+    try {
+      const result = await setPriceChartingLink(linkRow.card.id, url);
+      setLinkMessage(
+        !result.url
+          ? `Removed the PriceCharting link for ${cardTitle(linkRow.card)}.`
+          : result.price_error
+            ? `Link saved for ${cardTitle(linkRow.card)}, but its prices couldn't be read yet: ${result.price_error}`
+            : `Link saved and PSA 9 / PSA 10 prices added for ${cardTitle(linkRow.card)}.`
+      );
+      setLinkRow(null);
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setLinkError(err.message);
+    } finally {
+      setLinkSaving(false);
+    }
+  }
+
+  const lastRefresh = report?.last_refresh?.finished_at;
   const top = rows.filter((row) => row.available).slice(0, 5);
   const setFilter = (key) => (event) =>
     setFilters((current) => ({ ...current, [key]: event.target.value }));
@@ -280,8 +340,18 @@ function GradingOpportunities({ refreshKey, onZoom }) {
           <h3>Raw cards with grading upside</h3>
           {report && (
             <small>
-              {report.available} of {report.raw_cards} raw cards have graded prices · grading
-              cost {money(report.grading_cost)} per card
+              {report.available} of {report.raw_cards} raw cards have graded prices ·{" "}
+              {report.linked} linked to PriceCharting · grading cost{" "}
+              {money(report.grading_cost)} per card
+            </small>
+          )}
+          {report && (
+            <small>
+              PriceCharting prices update Mondays and Thursdays
+              {lastRefresh
+                ? ` · last ${new Date(lastRefresh).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                : ""}
+              . Add links under View all.
             </small>
           )}
         </div>
@@ -301,7 +371,9 @@ function GradingOpportunities({ refreshKey, onZoom }) {
         </div>
       )}
 
-      {top.length > 0 && <OpportunityTable rows={top} onZoom={onZoom} />}
+      {linkMessage && !showAll && <div className="status success">{linkMessage}</div>}
+
+      {top.length > 0 && <OpportunityTable rows={top} onZoom={onZoom} onEditLink={editLink} />}
 
       <p className="analytics-note">
         Market opportunity only. Actual grade depends on card condition.
@@ -387,14 +459,81 @@ function GradingOpportunities({ refreshKey, onZoom }) {
               ))}
             </div>
 
+            {linkMessage && <div className="status success">{linkMessage}</div>}
+
             {visible.length === 0 ? (
               <div className="empty-state small">No cards match these filters.</div>
             ) : (
-              <OpportunityTable rows={visible} onZoom={onZoom} />
+              <OpportunityTable rows={visible} onZoom={onZoom} onEditLink={editLink} />
             )}
 
             <p className="analytics-note">{report.score_explanation}</p>
           </div>
+        </div>
+      )}
+
+      {linkRow && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => event.target === event.currentTarget && setLinkRow(null)}
+        >
+          <form
+            className="modal"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveLink(linkDraft.trim());
+            }}
+          >
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">PRICECHARTING LINK</p>
+                <h2>{cardTitle(linkRow.card)}</h2>
+                <span>
+                  {linkRow.card.set_name}
+                  {variantLabel(linkRow.card.variant) ? ` · ${variantLabel(linkRow.card.variant)}` : ""}
+                </span>
+              </div>
+
+              <button type="button" className="close-button" aria-label="Close" onClick={() => setLinkRow(null)}>
+                ×
+              </button>
+            </div>
+
+            <p className="modal-tip">
+              Paste this card's PriceCharting page, for the same set and variant
+              (e.g. a Reverse Holo has its own page). Its Grade 9 and PSA 10 prices
+              are read now and then every Monday and Thursday.
+            </p>
+
+            <label>
+              PriceCharting page URL
+              <input
+                type="url"
+                value={linkDraft}
+                onChange={(event) => setLinkDraft(event.target.value)}
+                placeholder="https://www.pricecharting.com/game/..."
+                autoFocus
+              />
+            </label>
+
+            {linkError && <div className="status error">{linkError}</div>}
+
+            <div className="modal-actions">
+              {linkRow.pricecharting_url && (
+                <button type="button" className="secondary-button" onClick={() => saveLink("")} disabled={linkSaving}>
+                  Remove
+                </button>
+              )}
+
+              <button type="button" className="secondary-button" onClick={() => setLinkRow(null)}>
+                Cancel
+              </button>
+
+              <button type="submit" disabled={linkSaving || !linkDraft.trim()}>
+                {linkSaving ? "Saving…" : "Save link"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </section>

@@ -66,6 +66,10 @@ function refreshStatusText(status) {
       return `Syncing small hits… ${done}/${total}`;
     }
 
+    if (kind === "grading_data") {
+      return `Updating grading prices… ${done}/${total}`;
+    }
+
     return `Syncing ${phase === "graded" ? "graded" : "raw"} prices… ${done}/${total}`;
   }
 

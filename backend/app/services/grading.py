@@ -85,7 +85,8 @@ def inputs_from_collection(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_card: dict[str, dict[str, Any]] = {}
 
     for item in items:
-        if item.get("ownership_grade") != "RAW":
+        # Small hits are left out: at under $2, grading never pays.
+        if item.get("ownership_grade") != "RAW" or item.get("small_hit"):
             continue
 
         card = item["card"]
@@ -102,6 +103,7 @@ def inputs_from_collection(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 for key in ("id", "name", "card_number", "set_name", "variant", "rarity", "image_url")
             },
             "language": _language(card),
+            "pricecharting_url": (card.get("marketplace_urls") or {}).get("pricecharting_url"),
             "quantity": quantity,
             "small_hit": bool(item.get("small_hit")),
             "raw": _grade_value(values.get("RAW")),
@@ -122,6 +124,7 @@ def evaluate(entry: dict[str, Any], grading_cost: float) -> dict[str, Any]:
         "collection_item_id": entry["collection_item_id"],
         "card": entry["card"],
         "language": entry["language"],
+        "pricecharting_url": entry.get("pricecharting_url"),
         "quantity": entry["quantity"],
         "small_hit": entry["small_hit"],
         "raw_value": raw,
@@ -154,8 +157,10 @@ def evaluate(entry: dict[str, Any], grading_cost: float) -> dict[str, Any]:
         return result
     if psa10 is None:
         result["unavailable_reason"] = (
-            "Graded pricing unavailable. " + (entry["psa10"]["summary"] or "")
-        ).strip()
+            "Graded pricing unavailable. Add this card's PriceCharting link."
+            if not entry.get("pricecharting_url")
+            else ("Graded pricing unavailable. " + (entry["psa10"]["summary"] or "")).strip()
+        )
         return result
 
     psa10_net = psa10 - raw - grading_cost
@@ -268,6 +273,7 @@ def report(
         "default_grading_cost": round(default_grading_cost, 2),
         "raw_cards": len(rows),
         "available": sum(1 for row in rows if row["available"]),
+        "linked": sum(1 for row in rows if row["pricecharting_url"]),
         "score_explanation": SCORE_EXPLANATION,
         "opportunities": rows,
     }
