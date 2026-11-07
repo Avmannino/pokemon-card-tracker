@@ -218,6 +218,18 @@ class Lot:
             yield when, -qty * (self.price(when) or 0.0)
 
 
+# Cards listed under Biggest Portfolio Contributors, per range.
+CONTRIBUTOR_COUNT = 10
+
+
+def _card_summary(card: dict[str, Any]) -> dict[str, Any]:
+    """The card fields the dashboard shows (name, set, image...)."""
+    return {
+        key: card.get(key)
+        for key in ("id", "name", "card_number", "set_name", "variant", "rarity", "image_url")
+    }
+
+
 class Performance:
     """Raw value, flows and adjusted value for a set of lots."""
 
@@ -261,6 +273,80 @@ class Performance:
         return self.raw_value(moment, include_events_at_moment) - self.net_flows(
             start, max(flows_through, start)
         )
+
+    def attribution(self, start: datetime, end: datetime) -> dict[str, Any]:
+        """Why the collection's value changed from `start` to `end`:
+
+            total change = market movement + cards added + cards removed
+
+        "Cards added" and "cards removed" (negative) are the ADD/REMOVE flows
+        in (start, end], each at the card's market value when it happened -
+        the same values the chart books them at - so buying a card is never
+        counted as a gain and selling one never as a loss. A second copy is
+        its own addition. "Market movement" is the rest: the price moves of
+        cards while you held them, and only while you held them.
+
+        Per card it's worked out the same way (value at the end - value at
+        the start - that card's flows), so the contributors add up to the
+        market movement."""
+        added = 0.0
+        removed = 0.0
+        by_card: dict[tuple[Any, str], dict[str, Any]] = {}
+
+        for lot in self.lots:
+            lot_added = 0.0
+            lot_removed = 0.0
+            for moment, amount in lot.flows():
+                if start < moment <= end:
+                    if amount >= 0:
+                        lot_added += amount
+                    else:
+                        lot_removed += amount
+
+            held_at_start = lot.held(start)
+            held_at_end = lot.held(end)
+            if not (held_at_start or held_at_end or lot_added or lot_removed):
+                continue  # not owned at any point in the range
+
+            start_value = held_at_start * (lot.price(start) or 0.0)
+            end_value = held_at_end * (lot.price(end) or 0.0)
+            added += lot_added
+            removed += lot_removed
+
+            entry = by_card.setdefault(
+                (lot.card.get("id"), lot.grade),
+                {
+                    "card": _card_summary(lot.card),
+                    "grade": lot.grade,
+                    "quantity": 0,
+                    "market_change": 0.0,
+                },
+            )
+            entry["quantity"] += held_at_end
+            entry["market_change"] += end_value - start_value - lot_added - lot_removed
+
+        starting = self.raw_value(start)
+        ending = self.raw_value(end)
+        total = ending - starting
+
+        # Ranked by dollars, not percent: a $2 card doubling contributes $2.
+        contributors = sorted(
+            (entry for entry in by_card.values() if abs(entry["market_change"]) >= 0.005),
+            key=lambda entry: abs(entry["market_change"]),
+            reverse=True,
+        )[:CONTRIBUTOR_COUNT]
+        for entry in contributors:
+            entry["market_change"] = round(entry["market_change"], 2)
+
+        return {
+            "starting_value": round(starting, 2),
+            "ending_value": round(ending, 2),
+            "total_change": round(total, 2),
+            "market_change": round(total - added - removed, 2),
+            "acquisitions": round(added, 2),
+            "removals": round(removed, 2),
+            "contributors": contributors,
+        }
 
     def report(self, start: datetime, end: datetime, step: timedelta) -> dict[str, Any]:
         """Chart points from start to end, and the range's performance."""
@@ -678,6 +764,12 @@ def build_dashboard(
         for key, duration in RANGES:
             start = first_added if duration is None else max(now - duration, first_added)
             ranges[key] = performance.report(start, now, _step(now - start))
+            ranges[key]["attribution"] = {
+                **performance.attribution(start, now),
+                # Market performance as a percent: the chart's time-weighted
+                # return, which additions and removals don't move.
+                "market_change_pct": ranges[key]["change_pct"],
+            }
     else:
         for key, _ in RANGES:
             ranges[key] = {"points": [], "change": None, "change_pct": None}

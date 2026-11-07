@@ -26,6 +26,12 @@ class Settings:
         self.poketrace_api_key = os.getenv("POKETRACE_API_KEY", "").strip()
         # Optional: graded (PSA) prices are only pulled when this is set.
         self.rapidapi_key = os.getenv("RAPIDAPI_KEY", "").strip()
+        # Default grading cost per card for Grading Opportunities (the page
+        # can use its own).
+        try:
+            self.grading_cost = float(os.getenv("GRADING_COST", "30"))
+        except ValueError:
+            self.grading_cost = 30.0
         self.frontend_origin = os.getenv(
             "FRONTEND_ORIGIN",
             "http://localhost:5173",

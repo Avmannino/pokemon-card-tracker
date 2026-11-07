@@ -86,6 +86,75 @@ function PriceDetails({ valuation }) {
   );
 }
 
+function signedMoney(value) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return `${value < 0 ? "−" : "+"}${money(Math.abs(value))}`;
+}
+
+// A raw card's grading outlook (from Grading Opportunities): what each grade
+// is worth, and what grading would net at PSA 9 and PSA 10.
+function GradingOutcomes({ grading }) {
+  const outcomeTone = (value) =>
+    value === null || value === undefined ? "" : value >= 0 ? "positive" : "negative";
+
+  return (
+    <div className="grading-outcomes">
+      <div className="grading-outcomes-row">
+        <span>Raw market</span>
+        <strong>{money(grading.raw_value)}</strong>
+      </div>
+      <div className="grading-outcomes-row">
+        <span>PSA 9</span>
+        <strong>{money(grading.psa9_value)}</strong>
+      </div>
+      <div className="grading-outcomes-row">
+        <span>PSA 10</span>
+        <strong>{money(grading.psa10_value)}</strong>
+      </div>
+      <div className="grading-outcomes-row">
+        <span>Grading cost</span>
+        <strong>{money(grading.grading_cost)}</strong>
+      </div>
+
+      {grading.available ? (
+        <>
+          <p className="eyebrow">POTENTIAL OUTCOMES</p>
+          <div className="grading-outcomes-row">
+            <span>PSA 9</span>
+            <strong className={outcomeTone(grading.psa9_net)}>
+              {grading.psa9_net === null ? "PSA 9 price unknown" : `${signedMoney(grading.psa9_net)} net`}
+            </strong>
+          </div>
+          <div className="grading-outcomes-row">
+            <span>PSA 10</span>
+            <strong className={outcomeTone(grading.psa10_net)}>
+              {signedMoney(grading.psa10_net)} net
+            </strong>
+          </div>
+          <p className="grading-outcomes-note">
+            {grading.label} · score {grading.score}/100. {grading.risk_note}
+          </p>
+        </>
+      ) : (
+        <p className="grading-outcomes-note">{grading.unavailable_reason}</p>
+      )}
+
+      {grading.graded_source && (
+        <p className="grading-outcomes-note">
+          PSA 10: {grading.graded_source}
+          {shortDate(grading.graded_as_of) ? ` As of ${shortDate(grading.graded_as_of)}.` : ""}
+        </p>
+      )}
+
+      <p className="grading-outcomes-note">
+        Market opportunity only. Actual grade depends on card condition.
+      </p>
+    </div>
+  );
+}
+
 export function useCardZoom() {
   const [zoomedCard, setZoomedCard] = useState(null);
 
@@ -189,6 +258,8 @@ function CardZoomModal({ card, onClose }) {
               </span>
 
               <PriceDetails valuation={card.owned.valuation} />
+
+              {card.owned.grading && <GradingOutcomes grading={card.owned.grading} />}
             </div>
           )}
         </figcaption>

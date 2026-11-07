@@ -17,7 +17,7 @@ from .schemas import (
     GradedValuesRequest,
     VariantChangeRequest,
 )
-from .services import poketrace, price_sync
+from .services import grading, poketrace, price_sync
 from .services.portfolio import build_dashboard, lot_price, value_changes
 from .services.valuation import (
     build_market_values,
@@ -224,8 +224,9 @@ def _build_collection(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_responses() -> dict[str, bytes]:
-    """The collection and dashboard, as ready-to-send JSON (see cache.py)."""
+def _build_responses() -> dict[str, Any]:
+    """The collection and dashboard as ready-to-send JSON, and the stored
+    prices Grading Opportunities works from (see cache.py)."""
     data = _load_collection_data()
     dashboard = build_dashboard(
         items=data["items"],
@@ -236,9 +237,12 @@ def _build_responses() -> dict[str, bytes]:
         last_syncs=data["last_syncs"],
     )
 
+    collection = _build_collection(data)
+
     return {
-        "collection": _json_bytes(_build_collection(data)),
+        "collection": _json_bytes(collection),
         "dashboard": _json_bytes(dashboard),
+        "grading_inputs": grading.inputs_from_collection(collection["items"]),
     }
 
 
@@ -263,7 +267,19 @@ def list_collection() -> Response:
 
 @app.get("/api/portfolio/dashboard")
 def portfolio_dashboard() -> Response:
+    """Includes each range's attribution (market movement vs cards added and
+    removed) and biggest contributors."""
     return Response(cache.get()["dashboard"], media_type="application/json")
+
+
+@app.get("/api/grading-opportunities")
+def grading_opportunities(
+    grading_cost: float | None = Query(default=None, ge=0, le=1000),
+) -> dict[str, Any]:
+    """Raw cards you own, ranked by grading upside. Reads stored prices
+    only - opening the screen never calls a pricing API."""
+    cost = settings.grading_cost if grading_cost is None else grading_cost
+    return grading.report(cache.get()["grading_inputs"], cost, settings.grading_cost)
 
 
 def _record_add_event(item: dict[str, Any]) -> None:

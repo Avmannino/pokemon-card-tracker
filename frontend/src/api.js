@@ -58,6 +58,13 @@ export function getPortfolioDashboard() {
   return request("/api/portfolio/dashboard");
 }
 
+// Raw cards ranked by grading upside, from stored prices only. `gradingCost`
+// null = the backend's default.
+export function getGradingOpportunities(gradingCost = null) {
+  const params = gradingCost === null ? "" : `?grading_cost=${encodeURIComponent(gradingCost)}`;
+  return request(`/api/grading-opportunities${params}`);
+}
+
 export function addCollectionItem(payload) {
   return request("/api/collection", {
     method: "POST",

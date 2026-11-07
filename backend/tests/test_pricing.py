@@ -501,6 +501,9 @@ class GradedPullQuotaIsolation(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(price_sync, "pull_card_graded_prices", graded_exhausted),
             mock.patch.object(tcggo, "is_configured", lambda: True),
             mock.patch.object(tcggo, "requests_remaining", lambda: None),
+            # The post-sync cache rebuild reads the whole collection; not
+            # what this test is about, and it would reach the real database.
+            mock.patch.object(price_sync.cache, "rebuild", lambda: None),
         ]
         for patcher in patches:
             patcher.start()

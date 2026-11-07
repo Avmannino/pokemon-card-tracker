@@ -425,6 +425,31 @@ graded grades carry over, since they describe the card you own.
 
 ---
 
+## Portfolio Change and Grading Opportunities
+
+**Portfolio Change** (under the chart, for the chart's selected range)
+splits the change in your collection's value into:
+
+- **Market movement:** price changes of cards while you held them, and only
+  while you held them.
+- **Cards added:** each at its market value when added. A second copy is
+  its own addition.
+- **Cards removed:** each at its market value when removed (negative).
+
+`total change = market movement + cards added + cards removed`. It uses the
+same ownership history (`collection_events`) and prices as the chart, so
+market movement always matches the chart's change. **Biggest Portfolio
+Contributors** lists the cards whose price moves added or took away the
+most dollars (price change x copies held).
+
+**Grading Opportunities** ranks the raw cards you own by what a PSA 10 and
+a PSA 9 would be worth over the raw card plus a grading cost ($30 by
+default; set `GRADING_COST` on the backend, or change it on the page). It
+only uses stored prices for the same card and variant, and shows "Graded
+pricing unavailable" otherwise. The score formula is in
+`backend/app/services/grading.py` and explained on the page. Market
+opportunity only; the actual grade depends on the card's condition.
+
 # 11. Current project structure
 
 ```text
