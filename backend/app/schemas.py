@@ -61,3 +61,6 @@ class GradedValuesRequest(BaseModel):
     psa_8: float | None = Field(default=None, ge=0)
     psa_9: float | None = Field(default=None, ge=0)
     psa_10: float | None = Field(default=None, ge=0)
+    # Read the values from source_url's PriceCharting page instead (also
+    # done when no values are given and source_url is a PriceCharting page).
+    read_from_page: bool = False

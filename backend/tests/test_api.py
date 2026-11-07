@@ -167,6 +167,39 @@ class ApiTestCase(unittest.TestCase):
         return card, item
 
 
+class GradedValuesEndpoint(ApiTestCase):
+    def test_reads_psa_values_from_a_pricecharting_link(self):
+        card, _ = self.own_reverse_holo_gengar(grade="PSA_10")
+        link = "https://www.pricecharting.com/game/pokemon-scarlet-&-violet-151/gengar-reverse-holo-94?q=gengar"
+        fetched = []
+
+        async def fake_prices(url):
+            fetched.append(url)
+            return {"PSA_8": 30.0, "PSA_9": 45.0, "PSA_10": 120.0}
+
+        with mock.patch.object(main.pricecharting, "get_prices", fake_prices):
+            response = self.client.post(
+                f"/api/cards/{card['id']}/graded-values",
+                json={"source": "PSA CardFacts — Average Price", "source_url": link},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["read_from_page"])
+        self.assertEqual(fetched, [link.split("?")[0]])
+        self.assertEqual(response.json()["market_values"]["PSA_10"]["estimate"], 120.0)
+        saved = [row for row in self.fake.snapshots if row["metadata"].get("read_from") == "PriceCharting"]
+        self.assertEqual({row["grade"] for row in saved}, {"PSA_8", "PSA_9", "PSA_10"})
+        self.assertTrue(all(row["metadata"]["entry_method"] == "manual" for row in saved))
+
+    def test_no_values_and_no_link_is_refused(self):
+        card, _ = self.own_reverse_holo_gengar()
+        response = self.client.post(
+            f"/api/cards/{card['id']}/graded-values",
+            json={"source": "PSA CardFacts — Average Price", "source_url": "https://psa.example/x"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+
 class VariantEndpoint(ApiTestCase):
     def test_confirming_the_saved_variant(self):
         card, item = self.own_reverse_holo_gengar()

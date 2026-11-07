@@ -715,42 +715,82 @@ async def refresh_small_hits() -> dict[str, bool]:
 
 
 @app.post("/api/cards/{card_id}/graded-values")
-def save_graded_values(
+async def save_graded_values(
     card_id: str,
     request: GradedValuesRequest,
 ) -> dict[str, Any]:
+    """Saves your PSA values for a card: the ones you typed, or - with a
+    PriceCharting link and no values (or read_from_page) - the PSA 8, 9 and
+    10 prices read from that page now (one request). Either way they're
+    your prices, and Refresh Graded Cards keeps the grade you own updated
+    from the link."""
     card = db.get_card(card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found.")
 
-    grade_map = {
-        "PSA_7": request.psa_7,
-        "PSA_8": request.psa_8,
-        "PSA_9": request.psa_9,
-        "PSA_10": request.psa_10,
+    typed = {
+        grade: value
+        for grade, value in {
+            "PSA_7": request.psa_7,
+            "PSA_8": request.psa_8,
+            "PSA_9": request.psa_9,
+            "PSA_10": request.psa_10,
+        }.items()
+        if value is not None
     }
+    page = pricecharting.page_url(request.source_url)
+    read_page = request.read_from_page or (not typed and page is not None)
 
-    saved = []
-    for grade, value in grade_map.items():
-        if value is None:
-            continue
-
-        saved.append(
-            db.insert_price_snapshot(
-                card_id=card_id,
-                grade=grade,
-                source=request.source,
-                value=value,
-                source_url=request.source_url,
-                metadata={"entry_method": "manual"},
+    if read_page:
+        if page is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Paste a PriceCharting card page to read the prices from it.",
             )
-        )
+        try:
+            prices = await pricecharting.get_prices(page)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Couldn't read the PriceCharting page: {exc}"
+            ) from exc
 
-    if not saved:
+        values = {grade: price for grade, price in prices.items() if price is not None}
+        if not values:
+            raise HTTPException(
+                status_code=400,
+                detail="PriceCharting has no Grade 8, Grade 9 or PSA 10 price on that page.",
+            )
+    else:
+        values = typed
+
+    if not values:
         raise HTTPException(
             status_code=400,
-            detail="Enter at least one PSA value.",
+            detail="Enter at least one PSA value, or paste a PriceCharting card link to read them.",
         )
+
+    saved = [
+        db.insert_price_snapshot(
+            card_id=card_id,
+            grade=grade,
+            source=request.source,
+            value=value,
+            source_url=request.source_url,
+            metadata={
+                "entry_method": "manual",
+                **(
+                    {
+                        "read_from": "PriceCharting",
+                        "price_label": pricecharting.GRADE_LABELS[grade],
+                        "page_url": page,
+                    }
+                    if read_page
+                    else {}
+                ),
+            },
+        )
+        for grade, value in values.items()
+    ]
 
     snapshots = db.get_price_snapshots(card_id)
     market_values = build_market_values(snapshots)
@@ -768,5 +808,7 @@ def save_graded_values(
 
     return {
         "saved": len(saved),
+        "read_from_page": read_page,
+        "values": values,
         "market_values": market_values,
     }

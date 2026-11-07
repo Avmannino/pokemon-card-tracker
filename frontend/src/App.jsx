@@ -8,6 +8,7 @@ import {
   saveGradedValues,
   searchCards,
   setCollectionVariant,
+  setPriceChartingLink,
   startGradedRefresh,
   startSmallHitsSync,
   startSync,
@@ -330,6 +331,10 @@ function filterItems(items, query) {
   });
 }
 
+function isPriceChartingUrl(url) {
+  return /^https?:\/\/(www\.)?pricecharting\.com\/game\//i.test((url || "").trim());
+}
+
 function emptyAddForm(card = null, smallHit = false) {
   return {
     card,
@@ -430,6 +435,7 @@ function App() {
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
+  const [savingPsa, setSavingPsa] = useState(false);
   const [variantItem, setVariantItem] = useState(null);
   const [variantChoice, setVariantChoice] = useState("");
   const [savingVariant, setSavingVariant] = useState(false);
@@ -1005,7 +1011,9 @@ function App() {
     }
   }
 
-  async function handleSavePsa(event) {
+  // Saves the PSA values you typed, or - with a PriceCharting link and no
+  // values, or via Read from PriceCharting - reads them from that page.
+  async function handleSavePsa(event, readFromPage = false) {
     event.preventDefault();
 
     if (!psaForm.item) {
@@ -1017,21 +1025,57 @@ function App() {
 
     const toNumberOrNull = (value) =>
       value === "" ? null : Number(value);
+    const url = psaForm.source_url.trim();
+    const typed = [psaForm.psa_8, psaForm.psa_9, psaForm.psa_10].some((value) => value !== "");
+    const readPage = readFromPage || (!typed && isPriceChartingUrl(url));
+
+    if (!typed && !readPage) {
+      setError("Enter at least one PSA value, or paste a PriceCharting card link to read them.");
+      return;
+    }
+
+    setSavingPsa(true);
 
     try {
-      await saveGradedValues(psaForm.item.card.id, {
+      if (readPage && psaForm.item.ownership_grade === "RAW") {
+        // A raw card's page is its Grading Opportunities link, kept up to
+        // date twice a week.
+        const result = await setPriceChartingLink(psaForm.item.card.id, url);
+        setPsaForm(emptyPsaForm());
+        await loadCollection();
+        setDashboardVersion((version) => version + 1);
+        setMessage(
+          result.price_error
+            ? `Link saved, but its prices couldn't be read yet: ${result.price_error}`
+            : "Linked to PriceCharting. Its PSA 9 and PSA 10 prices now feed Grading Opportunities."
+        );
+        return;
+      }
+
+      const result = await saveGradedValues(psaForm.item.card.id, {
         source: psaForm.source.trim(),
-        source_url: psaForm.source_url.trim() || null,
-        psa_8: toNumberOrNull(psaForm.psa_8),
-        psa_9: toNumberOrNull(psaForm.psa_9),
-        psa_10: toNumberOrNull(psaForm.psa_10),
+        source_url: url || null,
+        psa_8: readPage ? null : toNumberOrNull(psaForm.psa_8),
+        psa_9: readPage ? null : toNumberOrNull(psaForm.psa_9),
+        psa_10: readPage ? null : toNumberOrNull(psaForm.psa_10),
+        read_from_page: readPage,
       });
 
       setPsaForm(emptyPsaForm());
       await loadCollection();
-      setMessage("PSA market values saved.");
+
+      const read = Object.entries(result.values || {})
+        .map(([grade, value]) => `${gradeLabel(grade)} ${money(value)}`)
+        .join(" · ");
+      setMessage(
+        result.read_from_page
+          ? `Read from PriceCharting: ${read}.`
+          : "PSA market values saved."
+      );
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSavingPsa(false);
     }
   }
 
@@ -2025,9 +2069,11 @@ function App() {
                 </h2>
 
                 <span>
-                  Enter values from a source you checked
-                  manually. With a PriceCharting URL, Refresh
-                  Graded Cards updates the grade you own.
+                  Paste the card's PriceCharting link and press
+                  Read from PriceCharting, or type values you
+                  checked yourself. With a PriceCharting link,
+                  Refresh Graded Cards keeps the grade you own
+                  updated.
                 </span>
               </div>
 
@@ -2139,7 +2185,17 @@ function App() {
                 Cancel
               </button>
 
-              <button type="submit">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={(event) => handleSavePsa(event, true)}
+                disabled={savingPsa || !isPriceChartingUrl(psaForm.source_url)}
+                title="Reads the PSA 8, 9 and 10 prices from the PriceCharting page"
+              >
+                {savingPsa ? "Reading…" : "Read from PriceCharting"}
+              </button>
+
+              <button type="submit" disabled={savingPsa}>
                 Save PSA Values
               </button>
             </div>
