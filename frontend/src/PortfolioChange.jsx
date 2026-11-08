@@ -1,7 +1,7 @@
 import { cardTitle, gradeLabel, money, percent } from "./format.js";
 
 const RANGE_TITLES = {
-  "1D": "Past day",
+  "1D": "Today",
   "1W": "Past week",
   "1M": "Past month",
   "3M": "Past 3 months",

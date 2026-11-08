@@ -33,7 +33,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from ..config import settings
 from .valuation import (
     estimate_from_sources,
     grade_label,
@@ -762,7 +764,13 @@ def build_dashboard(
         first_added = min(performance.first_added, now)
 
         for key, duration in RANGES:
-            start = first_added if duration is None else max(now - duration, first_added)
+            if duration is None:
+                start = first_added
+            elif key == "1D":
+                start = max(start_of_today(now), first_added)
+            else:
+                start = max(now - duration, first_added)
+
             ranges[key] = performance.report(start, now, _step(now - start))
             ranges[key]["attribution"] = {
                 **performance.attribution(start, now),
@@ -809,6 +817,13 @@ def value_change(
 CHANGE_WINDOWS = {"1D": 1, "1W": 7, "1M": 30}
 
 
+def start_of_today(now: datetime) -> datetime:
+    """Midnight at the start of `now`'s day, in your time zone (the one the
+    sync schedule uses). "1D" means today: midnight until now."""
+    local = now.astimezone(ZoneInfo(settings.refresh_timezone))
+    return local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def value_changes(
     snapshots: list[dict[str, Any]],
     grade: str,
@@ -821,7 +836,9 @@ def value_changes(
     now = now or datetime.now(timezone.utc)
     series = PriceSeries(snapshots, grade, card)
     changes = {
-        name: _change(series, grade, days, now)
+        name: _change(
+            series, grade, days, now, start_of_today(now) if name == "1D" else None
+        )
         for name, days in CHANGE_WINDOWS.items()
     }
 
@@ -868,8 +885,14 @@ def _change_since_added(
     return result
 
 
-def _change(series: PriceSeries, grade: str, days_back: int, now: datetime) -> dict[str, Any]:
-    start = now - timedelta(days=days_back)
+def _change(
+    series: PriceSeries,
+    grade: str,
+    days_back: int,
+    now: datetime,
+    start: datetime | None = None,
+) -> dict[str, Any]:
+    start = start or now - timedelta(days=days_back)
     current = series.at(now)
     past = series.at(start)
     has_price = current is not None and past is not None

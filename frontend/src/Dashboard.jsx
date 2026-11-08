@@ -20,7 +20,7 @@ const TIMED_RANGES = new Set(["1D", "1W"]);
 
 // Portfolio-level value change.
 const PERFORMANCE_WINDOWS = [
-  { key: "1D", label: "Past Day" },
+  { key: "1D", label: "Today" },
   { key: "1W", label: "Past Week" },
   { key: "1M", label: "Past Month" },
   { key: "3M", label: "Past 3 Months" },

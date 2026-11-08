@@ -212,7 +212,7 @@ function ChangeCell({ change, window }) {
   const title =
     window === "ADDED"
       ? `${label} value per card since you added it on ${shortDay(change.added_at)}`
-      : `${label} value over the past ${WINDOW_NAMES[window]}` +
+      : `${label} value ${window === "1D" ? "today, since midnight" : `over the past ${WINDOW_NAMES[window]}`}` +
         (change.since ? ` (since ${shortDay(change.since)}, its first price)` : "");
 
   return (

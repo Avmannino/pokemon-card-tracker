@@ -9,7 +9,14 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from app.services import grading, price_sync, pricecharting
-from app.services.portfolio import Lot, Performance, PriceSeries
+from app.services.portfolio import (
+    Lot,
+    Performance,
+    PriceSeries,
+    build_dashboard,
+    start_of_today,
+    value_changes,
+)
 from app.services.valuation import build_market_values
 
 
@@ -214,6 +221,40 @@ class GradingOpportunities(unittest.TestCase):
         )
         self.assertEqual([row["card"]["id"] for row in report["opportunities"]], ["some", "none"])
         self.assertEqual(report["available"], 1)
+
+
+class TodayWindow(unittest.TestCase):
+    # 10:00 AM Eastern on Jan 2 (the schedule's time zone).
+    NOW = datetime(2026, 1, 2, 15, tzinfo=timezone.utc)
+
+    def snapshots(self):
+        return [
+            {"grade": "RAW", "source": "market", "value": value,
+             "observed_at": moment.isoformat(), "metadata": {}}
+            for moment, value in (
+                (datetime(2026, 1, 1, 20, tzinfo=timezone.utc), 100),  # 3 PM yesterday
+                (datetime(2026, 1, 2, 4, tzinfo=timezone.utc), 110),   # 11 PM yesterday
+                (datetime(2026, 1, 2, 13, tzinfo=timezone.utc), 120),  # 8 AM today
+            )
+        ]
+
+    def test_1d_starts_at_midnight_not_24_hours_ago(self):
+        self.assertEqual(
+            start_of_today(self.NOW), datetime(2026, 1, 2, 5, tzinfo=timezone.utc)
+        )
+        changes = value_changes(self.snapshots(), "RAW", now=self.NOW)
+        # Against 11 PM's $110 (the price at midnight), not 24 hours ago's $100.
+        self.assertEqual(changes["1D"]["change"], 10)
+        self.assertEqual(changes["1W"]["change"], 20)
+
+    def test_dashboard_1d_range_is_today(self):
+        items = [{"id": "i1", "card_id": "c1", "ownership_grade": "RAW", "quantity": 1,
+                  "created_at": datetime(2026, 1, 1, 20, tzinfo=timezone.utc).isoformat()}]
+        result = build_dashboard(
+            items, [], {"c1": {"id": "c1", "name": "c1"}}, {"c1": self.snapshots()}, now=self.NOW
+        )
+        self.assertEqual(result["ranges"]["1D"]["change"], 10)
+        self.assertEqual(result["ranges"]["1D"]["attribution"]["market_change"], 10)
 
 
 class PriceChartingGradingPrices(unittest.TestCase):
