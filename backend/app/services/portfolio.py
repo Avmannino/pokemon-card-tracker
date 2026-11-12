@@ -64,6 +64,11 @@ POINTS_PER_RANGE = 120
 # collection, not as a market move after it joined.
 ENTRY_SETTLEMENT = timedelta(minutes=60)
 
+# Adding a card fetches its price right away; one saved this soon after is
+# that fetch, so it's the card's value when it joined (the nearest price at
+# or just after acquisition), not a move after it.
+ADD_FETCH_WINDOW = timedelta(minutes=2)
+
 # Biggest winners and losers: the past week, top 3 of each.
 MOVER_WINDOW = timedelta(days=7)
 
@@ -93,6 +98,20 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def price_time(row: dict[str, Any]) -> datetime:
+    """When a price joined the history: when it was saved here. A PokeTrace
+    row's observed_at is when PokeTrace last updated that price, often hours
+    or days before a sync fetched it; placing it there would file the move
+    under an earlier day (so "Today" missed what today's sync found) and
+    quietly rewrite days already shown. Rows without created_at (built in
+    code, e.g. tests) use observed_at.
+
+    Taken to the minute, so prices saved together - a card's TCGPlayer and
+    eBay prices when it's added, a moment apart - count as one update,
+    never as a brief eBay-only price."""
+    return parse_ts(row.get("created_at") or row["observed_at"]).replace(second=0, microsecond=0)
+
+
 class PriceSeries:
     """One card's market price for one grade over time.
 
@@ -119,17 +138,17 @@ class PriceSeries:
         ambiguous = is_variant_ambiguous(card)
         rows = sorted(
             (row for row in snapshots if row.get("grade") == grade),
-            key=lambda row: (parse_ts(row["observed_at"]), row.get("id") or 0),
+            key=lambda row: (price_time(row), row.get("id") or 0),
         )
 
         # Only prices you typed in; a sync re-reading your PriceCharting page
         # is a market move, not a correction.
         self.manual_times = [
-            parse_ts(row["observed_at"])
+            price_time(row)
             for row in rows
             if is_manual_entry(row) and not is_auto_refreshed(row)
         ]
-        self.observed_days = {parse_ts(row["observed_at"]).date() for row in rows}
+        self.observed_days = {price_time(row).date() for row in rows}
         self.times: list[datetime] = []
         self.values: list[float] = []
 
@@ -137,7 +156,7 @@ class PriceSeries:
         latest: dict[str, dict[str, Any]] = {}
 
         for row in rows:
-            observed = parse_ts(row["observed_at"])
+            observed = price_time(row)
             latest[row["source"]] = row
 
             if first_manual is not None and observed < first_manual:
@@ -185,10 +204,20 @@ class Lot:
             if self.added_at < moment <= self.added_at + ENTRY_SETTLEMENT
         ]
 
+        fetched = [
+            moment
+            for moment in self.series.times
+            if self.added_at < moment <= self.added_at + ADD_FETCH_WINDOW
+        ]
+
         if settling:
             # Until the price you entered right after adding lands, the card
             # is held at that price, so the addition is valued at it too.
             self.entry_settled_at = max(settling)
+            self.entry_price = self.series.at(self.entry_settled_at)
+        elif fetched:
+            # Same for the price fetched when you added it.
+            self.entry_settled_at = min(fetched)
             self.entry_price = self.series.at(self.entry_settled_at)
         else:
             self.entry_price = self.series.at(self.added_at)

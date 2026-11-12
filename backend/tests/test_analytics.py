@@ -257,6 +257,23 @@ class TodayWindow(unittest.TestCase):
         self.assertEqual(result["ranges"]["1D"]["attribution"]["market_change"], 10)
 
 
+class PricesCountWhenSynced(unittest.TestCase):
+    def test_a_price_synced_today_counts_today_even_if_dated_yesterday(self):
+        now = datetime(2026, 1, 2, 15, tzinfo=timezone.utc)  # 10 AM Eastern
+        snapshots = [
+            {"grade": "RAW", "source": "market", "value": 100,
+             "observed_at": datetime(2026, 1, 1, 13, tzinfo=timezone.utc).isoformat(),
+             "created_at": datetime(2026, 1, 1, 13, tzinfo=timezone.utc).isoformat(),
+             "metadata": {}},
+            # PokeTrace updated it at 11 PM yesterday; this morning's sync fetched it.
+            {"grade": "RAW", "source": "market", "value": 98,
+             "observed_at": datetime(2026, 1, 2, 4, tzinfo=timezone.utc).isoformat(),
+             "created_at": datetime(2026, 1, 2, 13, tzinfo=timezone.utc).isoformat(),
+             "metadata": {}},
+        ]
+        self.assertEqual(value_changes(snapshots, "RAW", now=now)["1D"]["change"], -2)
+
+
 class PriceChartingGradingPrices(unittest.TestCase):
     LINK = "https://www.pricecharting.com/game/pokemon-astral-radiance/hoothoot-tg12"
 

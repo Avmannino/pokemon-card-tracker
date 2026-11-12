@@ -135,25 +135,16 @@ def _raw_snapshot_rows(card: dict[str, Any], remote: dict[str, Any]) -> list[dic
 def store_raw_prices(card: dict[str, Any], remote: dict[str, Any]) -> int:
     """Saves Near Mint snapshots from `remote`, which must already be matched
     to `card` exactly (match_exact), and refreshes the catalog details."""
-    raw_sources = poketrace.extract_raw_sources(remote)
-
-    for raw_source in raw_sources:
-        db.insert_price_snapshot(
-            card_id=card["id"],
-            grade="RAW",
-            source=raw_source["source"],
-            value=raw_source["value"],
-            source_url=raw_source.get("source_url"),
-            observed_at=raw_source.get("observed_at"),
-            metadata=raw_source.get("metadata"),
-        )
+    # One write, so the card's sources share a saved time.
+    rows = _raw_snapshot_rows(card, remote)
+    db.insert_price_snapshots(rows)
 
     # Update mutable catalog information too.
     normalized = poketrace.normalize_card(remote)
     normalized["poketrace_id"] = card["poketrace_id"]
     db.save_card(normalized)
 
-    return len(raw_sources)
+    return len(rows)
 
 
 async def pull_card_raw_prices(card_id: str) -> int:

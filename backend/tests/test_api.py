@@ -81,6 +81,10 @@ class FakeDB:
         self.snapshots.append(row)
         return row
 
+    def insert_price_snapshots(self, rows):
+        for row in rows:
+            self.insert_price_snapshot(**row)
+
     def get_price_snapshots(self, card_id, limit=500):
         rows = [r for r in self.snapshots if r["card_id"] == card_id]
         return sorted(rows, key=lambda r: (r["observed_at"], r["id"]), reverse=True)
@@ -124,6 +128,7 @@ class ApiTestCase(unittest.TestCase):
         for name in (
             "get_card", "save_card", "add_collection_item", "get_collection_item",
             "get_collection_items", "delete_collection_item", "insert_price_snapshot",
+            "insert_price_snapshots",
             "get_price_snapshots", "get_collection_events", "insert_collection_event",
             "delete_collection_event", "update_card_variant_siblings",
             "set_item_variant_confirmed", "set_small_hit",
