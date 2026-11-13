@@ -3433,3 +3433,169 @@ a.manual-source-link:hover {
 .grading-modal .status {
   margin-bottom: 12px;
 }
+
+/* Grading Opportunities: Check any card. */
+.grading-heading-actions {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 8px;
+}
+
+.grading-checker {
+  margin-bottom: 18px;
+
+  padding: 16px;
+
+  border: 1px solid #1c232f;
+
+  border-radius: 14px;
+
+  background: #10151f;
+}
+
+.grading-checker .status,
+.grading-checker .empty-state {
+  margin-top: 12px;
+}
+
+.checker-results {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+  max-height: 360px;
+
+  margin-top: 12px;
+
+  overflow-y: auto;
+}
+
+.checker-result {
+  display: flex;
+
+  gap: 16px;
+
+  margin-top: 14px;
+}
+
+.checker-result > img {
+  flex-shrink: 0;
+
+  width: 120px;
+
+  align-self: flex-start;
+
+  border-radius: 8px;
+}
+
+.checker-body {
+  display: flex;
+
+  flex: 1;
+
+  flex-direction: column;
+
+  gap: 8px;
+
+  min-width: 0;
+}
+
+.checker-title {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 3px;
+}
+
+.checker-title strong {
+  color: #f7f9ff;
+
+  font-size: 1rem;
+}
+
+.checker-title span {
+  color: #9099aa;
+
+  font-size: 0.8rem;
+}
+
+.checker-title a {
+  color: #8fb0ff;
+}
+
+.checker-grid {
+  display: grid;
+
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  gap: 8px;
+}
+
+.checker-grid div {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+  padding: 10px;
+
+  border: 1px solid #1c232f;
+
+  border-radius: 10px;
+
+  background: #0d121b;
+}
+
+.checker-grid span {
+  color: #737f93;
+
+  font-size: 0.72rem;
+}
+
+.checker-grid strong {
+  font-size: 1rem;
+
+  font-variant-numeric: tabular-nums;
+}
+
+.checker-grid small {
+  color: #717d91;
+
+  font-size: 0.72rem;
+}
+
+.checker-parts {
+  margin: 0;
+
+  padding-left: 18px;
+
+  color: #9099aa;
+
+  font-size: 0.76rem;
+
+  line-height: 1.6;
+}
+
+@media (max-width: 620px) {
+  .checker-result {
+    flex-direction: column;
+  }
+
+  .checker-result > img {
+    width: 140px;
+  }
+
+  .checker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .refresh-buttons .sync-button:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}

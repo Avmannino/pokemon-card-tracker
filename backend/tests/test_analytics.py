@@ -341,5 +341,49 @@ class GradingDataRefresh(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((record["updated"], record["no_link"]), (1, 1))
 
 
+
+class GradingChecker(unittest.TestCase):
+    CARD_PAGE = """
+    <h1 id="product_name" class="chart_title"> Hoothoot #TG12
+      <a href="/console/pokemon-astral-radiance"> Pokemon Astral Radiance </a></h1>
+    <img src="https://storage.googleapis.com/images.pricecharting.com/abc123/240.jpg">
+    <div id="full-prices"><table>
+      <tr><td>Ungraded</td><td class="price js-price">$7.99</td></tr>
+      <tr><td>Grade 9</td><td class="price js-price">$55.00</td></tr>
+      <tr><td>PSA 10</td><td class="price js-price">$599.50</td></tr>
+    </table></div>
+    """
+
+    def test_card_page_is_checked_like_your_own_cards(self):
+        page = pricecharting.parse_card_page(
+            self.CARD_PAGE, "https://www.pricecharting.com/game/pokemon-astral-radiance/hoothoot-tg12"
+        )
+        self.assertEqual((page["name"], page["set_name"]), ("Hoothoot #TG12", "Pokemon Astral Radiance"))
+        self.assertEqual(page["prices"], {"RAW": 7.99, "PSA_9": 55.0, "PSA_10": 599.5})
+
+        result = grading.check_card(page, grading_cost=30)
+        self.assertEqual(result["psa10_net"], 561.51)
+        self.assertEqual(result["psa9_net"], 17.01)
+        self.assertEqual(result["label"], "Excellent Opportunity")
+
+    def test_search_results_keep_variants_apart(self):
+        def row(product, path, name, price):
+            return (
+                f'<tr id="product-{product}"><td class="title">'
+                f'<a href="https://www.pricecharting.com/game/{path}">{name}</a>'
+                f'<div class="console-in-title"><a href="/console/x">Pokemon Boundaries Crossed</a></div></td>'
+                f'<td class="price numeric used_price"><span class="js-price">{price}</span></td></tr>'
+            )
+
+        html = row(1, "pokemon-boundaries-crossed/squirtle-29", "Squirtle #29", "$2.99") + row(
+            2, "pokemon-boundaries-crossed/squirtle-reverse-holo-29", "Squirtle [Reverse Holo] #29", "$33.45"
+        )
+        results = pricecharting.parse_search_results(html)
+        self.assertEqual(
+            [(r["name"], r["raw_price"]) for r in results],
+            [("Squirtle #29", 2.99), ("Squirtle [Reverse Holo] #29", 33.45)],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

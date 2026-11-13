@@ -1619,6 +1619,16 @@ function App() {
               >
                 {gradedRunning ? "Refreshing…" : "Refresh Graded Cards"}
               </button>
+
+              {/* Asks "Are you sure?" first, like the drawer's button. */}
+              <button
+                type="button"
+                className="sync-button"
+                onClick={handleSmallHitsSync}
+                disabled={syncing || smallHitItems.length === 0}
+              >
+                {smallHitsRunning ? "Syncing…" : "Sync Small Hits"}
+              </button>
             </div>
 
             <small>{refreshStatusText(refreshStatus)}</small>

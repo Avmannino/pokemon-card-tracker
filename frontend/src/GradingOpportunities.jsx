@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { getGradingOpportunities, setPriceChartingLink } from "./api.js";
+import {
+  checkGradingCard,
+  getGradingOpportunities,
+  searchGradingChecker,
+  setPriceChartingLink,
+} from "./api.js";
 import { cardTitle, money, variantLabel } from "./format.js";
 
 // Your grading cost per card, remembered on this device. Unset = the
@@ -203,6 +208,183 @@ function OpportunityTable({ rows, onZoom, onEditLink }) {
   );
 }
 
+function isPriceChartingUrl(text) {
+  return /^https?:\/\/(www\.)?pricecharting\.com\/game\//i.test(text);
+}
+
+// Look up any card - owned or not - and see its grading outlook, from its
+// PriceCharting page (raw, PSA 9 and PSA 10 all from that one page, so the
+// same card and variant). Scored exactly like your own raw cards.
+function GradingChecker({ gradingCost }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState(null);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  async function check(url) {
+    setBusy("Checking…");
+    setError("");
+    try {
+      setResult(await checkGradingCard(url, gradingCost));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function search(event) {
+    event.preventDefault();
+    const text = query.trim();
+    if (text.length < 2) {
+      return;
+    }
+
+    setResult(null);
+    setError("");
+
+    if (isPriceChartingUrl(text)) {
+      setResults(null);
+      await check(text);
+      return;
+    }
+
+    setBusy("Searching…");
+    try {
+      const data = await searchGradingChecker(text);
+      setResults(data.results);
+      setBusy("");
+      if (data.results.length === 1) {
+        await check(data.results[0].url);
+      }
+    } catch (err) {
+      setError(err.message);
+      setBusy("");
+    }
+  }
+
+  // A new grading cost re-checks the card on screen.
+  useEffect(() => {
+    if (result?.pricecharting_url) {
+      check(result.pricecharting_url);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradingCost]);
+
+  return (
+    <div className="grading-checker">
+      <form className="search-form" onSubmit={search}>
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Card name and number, or a PriceCharting link"
+          aria-label="Check a card's grading outlook"
+        />
+        <button type="submit" disabled={Boolean(busy)}>
+          {busy || "Check"}
+        </button>
+      </form>
+
+      {error && <div className="status error">{error}</div>}
+
+      {results && results.length === 0 && (
+        <div className="empty-state small">No cards matched that search.</div>
+      )}
+
+      {results && results.length > 1 && !result && (
+        <div className="checker-results">
+          {results.map((card) => (
+            <button
+              type="button"
+              key={card.url}
+              className="search-suggestion"
+              onClick={() => check(card.url)}
+              disabled={Boolean(busy)}
+            >
+              {card.image_url ? <img src={card.image_url} alt="" /> : <span className="search-suggestion-thumb" />}
+
+              <span className="search-suggestion-copy">
+                <strong>{card.name}</strong>
+                <span>{card.set_name}</span>
+              </span>
+
+              <span className="search-suggestion-price">{money(card.raw_price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {result && (
+        <div className="checker-result">
+          {result.card.image_url && <img src={result.card.image_url} alt="" />}
+
+          <div className="checker-body">
+            <div className="checker-title">
+              <strong>{result.card.name}</strong>
+              <span>
+                {result.card.set_name} ·{" "}
+                <a href={result.pricecharting_url} target="_blank" rel="noreferrer">
+                  PriceCharting ↗
+                </a>
+                {results && results.length > 1 && (
+                  <>
+                    {" · "}
+                    <button type="button" className="text-button" onClick={() => setResult(null)}>
+                      Back to results
+                    </button>
+                  </>
+                )}
+              </span>
+              <span>
+                <LabelPill row={result} />
+                {result.available && ` Score ${result.score}/100`}
+              </span>
+            </div>
+
+            {result.available ? (
+              <>
+                <div className="checker-grid">
+                  {[
+                    ["Raw", money(result.raw_value), null],
+                    ["PSA 9", money(result.psa9_value), multiple(result.psa9_multiple)],
+                    ["PSA 10", money(result.psa10_value), multiple(result.psa10_multiple)],
+                    ["PSA 10 net", signedMoney(result.psa10_net), null, tone(result.psa10_net)],
+                    ["PSA 9 net", signedMoney(result.psa9_net), null, tone(result.psa9_net)],
+                    ["Grading cost", money(result.grading_cost), null],
+                  ].map(([label, value, sub, valueTone]) => (
+                    <div key={label}>
+                      <span>{label}</span>
+                      <strong className={valueTone || ""}>{value}</strong>
+                      {sub && <small>{sub}</small>}
+                    </div>
+                  ))}
+                </div>
+
+                <p className="grading-outcomes-note">{result.risk_note}</p>
+
+                <ul className="checker-parts">
+                  {result.score_parts.map((part) => (
+                    <li key={part.name}>
+                      {part.name}: {part.points}/{part.max} · {part.detail}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="grading-outcomes-note">{result.unavailable_reason}</p>
+            )}
+
+            <p className="grading-outcomes-note">
+              Market opportunity only. Actual grade depends on card condition.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Raw cards you own, ranked by how much a PSA 10 (and a PSA 9) would be
 // worth over the raw card plus grading. Built from stored prices only.
 function GradingOpportunities({ refreshKey, onZoom }) {
@@ -211,6 +393,7 @@ function GradingOpportunities({ refreshKey, onZoom }) {
   const [cost, setCost] = useState(savedCost);
   const [costDraft, setCostDraft] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [showChecker, setShowChecker] = useState(false);
   // The card whose PriceCharting link is being edited.
   const [linkRow, setLinkRow] = useState(null);
   const [linkDraft, setLinkDraft] = useState("");
@@ -356,12 +539,25 @@ function GradingOpportunities({ refreshKey, onZoom }) {
           )}
         </div>
 
-        {rows.length > 0 && (
-          <button type="button" className="secondary-button grading-view-all" onClick={() => setShowAll(true)}>
-            View all
+        <div className="grading-heading-actions">
+          <button
+            type="button"
+            className="secondary-button grading-view-all"
+            onClick={() => setShowChecker((open) => !open)}
+            aria-expanded={showChecker}
+          >
+            {showChecker ? "Hide checker" : "Check any card"}
           </button>
-        )}
+
+          {rows.length > 0 && (
+            <button type="button" className="secondary-button grading-view-all" onClick={() => setShowAll(true)}>
+              View all
+            </button>
+          )}
+        </div>
       </div>
+
+      {showChecker && <GradingChecker gradingCost={report?.grading_cost ?? cost} />}
 
       {error && <div className="status error">{error}</div>}
 

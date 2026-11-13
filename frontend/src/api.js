@@ -65,6 +65,21 @@ export function getGradingOpportunities(gradingCost = null) {
   return request(`/api/grading-opportunities${params}`);
 }
 
+// Grading checker: cards on PriceCharting matching `query`.
+export function searchGradingChecker(query) {
+  return request(`/api/grading-checker/search?q=${encodeURIComponent(query)}`);
+}
+
+// Grading checker: any card's grading outlook from its PriceCharting page,
+// without adding it.
+export function checkGradingCard(url, gradingCost = null) {
+  const params = new URLSearchParams({ url });
+  if (gradingCost !== null && gradingCost !== undefined) {
+    params.set("grading_cost", String(gradingCost));
+  }
+  return request(`/api/grading-checker/card?${params.toString()}`);
+}
+
 // Links a raw card to its PriceCharting page for Grading Opportunities
 // (empty removes it); saving reads that page once.
 export function setPriceChartingLink(cardId, url) {

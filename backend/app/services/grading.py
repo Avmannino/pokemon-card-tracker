@@ -251,6 +251,43 @@ def evaluate(entry: dict[str, Any], grading_cost: float) -> dict[str, Any]:
     return result
 
 
+def check_card(page: dict[str, Any], grading_cost: float) -> dict[str, Any]:
+    """The grading outlook of any card, owned or not, from its PriceCharting
+    page (pricecharting.get_card): raw (Ungraded), PSA 9 (Grade 9) and PSA
+    10 all from that one page, so all the same card and variant. Scored and
+    labeled exactly like your own raw cards."""
+    def value(amount):
+        return {
+            "value": amount,
+            "method": "pricecharting_guide",
+            "summary": "PriceCharting price guide.",
+            "as_of": None,
+            "sales": None,
+        }
+
+    prices = page.get("prices") or {}
+    entry = {
+        "collection_item_id": None,
+        "card": {
+            "id": page["url"],
+            "name": page.get("name") or "Card",
+            "card_number": None,
+            "set_name": page.get("set_name"),
+            "variant": None,
+            "rarity": None,
+            "image_url": page.get("image_url"),
+        },
+        "language": "Japanese" if "japanese" in (page.get("set_name") or page["url"]).lower() else "English",
+        "pricecharting_url": page["url"],
+        "quantity": 0,
+        "small_hit": False,
+        "raw": value(prices.get("RAW")),
+        "psa9": value(prices.get("PSA_9")),
+        "psa10": value(prices.get("PSA_10")),
+    }
+    return evaluate(entry, grading_cost)
+
+
 def report(
     inputs: list[dict[str, Any]],
     grading_cost: float,

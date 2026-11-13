@@ -650,6 +650,36 @@ async def refresh_graded() -> dict[str, bool]:
     return {"started": True}
 
 
+@app.get("/api/grading-checker/search")
+async def grading_checker_search(
+    q: str = Query(min_length=2, max_length=100),
+) -> dict[str, Any]:
+    """Grading checker: cards on PriceCharting matching `q` (one PriceCharting
+    request, only when you search)."""
+    try:
+        return {"results": await pricecharting.search(q)}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PriceCharting search failed: {exc}") from exc
+
+
+@app.get("/api/grading-checker/card")
+async def grading_checker_card(
+    url: str = Query(min_length=10, max_length=500),
+    grading_cost: float | None = Query(default=None, ge=0, le=1000),
+) -> dict[str, Any]:
+    """Grading checker: any card's grading outlook from its PriceCharting
+    page, without adding it (one PriceCharting request)."""
+    if pricecharting.page_url(url) is None:
+        raise HTTPException(status_code=400, detail="That isn't a PriceCharting card page.")
+    try:
+        page = await pricecharting.get_card(url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Couldn't read the PriceCharting page: {exc}") from exc
+
+    cost = settings.grading_cost if grading_cost is None else grading_cost
+    return grading.check_card(page, cost)
+
+
 @app.put("/api/cards/{card_id}/pricecharting-link")
 async def set_pricecharting_link(
     card_id: str,
