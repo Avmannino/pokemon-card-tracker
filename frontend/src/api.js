@@ -96,6 +96,15 @@ export function addCollectionItem(payload) {
   });
 }
 
+// Sets how many copies of a card you hold (1 or more); more copies count as
+// cards added, fewer as cards removed.
+export function setCollectionQuantity(itemId, quantity) {
+  return request(`/api/collection/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quantity }),
+  });
+}
+
 // Removes `quantity` copies (all of them if omitted).
 export function deleteCollectionItem(itemId, quantity) {
   const params = quantity ? `?quantity=${quantity}` : "";

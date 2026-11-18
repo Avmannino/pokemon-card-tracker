@@ -7,6 +7,7 @@ import {
   getRefreshStatus,
   saveGradedValues,
   searchCards,
+  setCollectionQuantity,
   setCollectionVariant,
   setPriceChartingLink,
   startGradedRefresh,
@@ -431,6 +432,8 @@ function App() {
 
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [psaForm, setPsaForm] = useState(emptyPsaForm());
+  // Collection rows whose quantity change is being saved.
+  const [savingQty, setSavingQty] = useState({});
   const [savingPsa, setSavingPsa] = useState(false);
   const [variantItem, setVariantItem] = useState(null);
   const [variantChoice, setVariantChoice] = useState("");
@@ -438,8 +441,11 @@ function App() {
   const [dashboardVersion, setDashboardVersion] = useState(0);
   const { zoomedCard, openZoom, closeZoom } = useCardZoom();
 
-  async function loadCollection() {
-    setLoadingCollection(true);
+  // `quiet`: refresh in the background, keeping the table on screen.
+  async function loadCollection({ quiet = false } = {}) {
+    if (!quiet) {
+      setLoadingCollection(true);
+    }
 
     try {
       const data = await getCollection();
@@ -819,6 +825,46 @@ function App() {
       setMessage(smallHitsSyncSummary(status));
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  // − / + in the Qty column. The row updates right away; totals and the
+  // dashboard catch up once the server has booked it (more copies count as
+  // cards added, fewer as cards removed).
+  async function changeQuantity(item, quantity) {
+    if (quantity < 1 || savingQty[item.id]) {
+      return;
+    }
+
+    setSavingQty((current) => ({ ...current, [item.id]: true }));
+    setError("");
+    setCollection((current) => ({
+      ...current,
+      items: current.items.map((row) =>
+        row.id === item.id
+          ? {
+              ...row,
+              quantity,
+              owned_market_value_total:
+                row.owned_market_value_each === null
+                  ? null
+                  : Math.round(row.owned_market_value_each * quantity * 100) / 100,
+            }
+          : row
+      ),
+    }));
+
+    try {
+      await setCollectionQuantity(item.id, quantity);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingQty((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      loadCollection({ quiet: true });
     }
   }
 
@@ -1441,9 +1487,31 @@ function App() {
                     </td>
 
                     <td>
-                      <strong className="qty-cell">
-                        {item.quantity}
-                      </strong>
+                      <div className="qty-stepper">
+                        <button
+                          type="button"
+                          aria-label={`One fewer ${cardTitle(item.card)}`}
+                          title={item.quantity <= 1 ? "Use Remove to take the last copy out" : "One fewer"}
+                          onClick={() => changeQuantity(item, item.quantity - 1)}
+                          disabled={item.quantity <= 1 || savingQty[item.id]}
+                        >
+                          −
+                        </button>
+
+                        <strong className="qty-cell">
+                          {item.quantity}
+                        </strong>
+
+                        <button
+                          type="button"
+                          aria-label={`One more ${cardTitle(item.card)}`}
+                          title="One more"
+                          onClick={() => changeQuantity(item, item.quantity + 1)}
+                          disabled={savingQty[item.id]}
+                        >
+                          +
+                        </button>
+                      </div>
                     </td>
 
                     <td>

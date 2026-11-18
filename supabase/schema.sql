@@ -81,7 +81,7 @@ create table if not exists public.collection_events (
     card_id uuid not null references public.cards(id) on delete cascade,
     grade text not null
         check (grade in ('RAW', 'PSA_7', 'PSA_8', 'PSA_9', 'PSA_10')),
-    event_type text not null check (event_type in ('ADD', 'REMOVE')),
+    event_type text not null check (event_type in ('ADD', 'REMOVE', 'INCREASE')),
     quantity integer not null check (quantity > 0),
     -- Market value per card when the event was recorded (null if the card had
     -- no price yet, or the event was backfilled). REMOVE flows are negative.

@@ -274,6 +274,18 @@ class PricesCountWhenSynced(unittest.TestCase):
         self.assertEqual(value_changes(snapshots, "RAW", now=now)["1D"]["change"], -2)
 
 
+class QuantityIncreases(unittest.TestCase):
+    def test_extra_copies_are_acquisitions_not_gains(self):
+        card = lot("A", [(0, 100), (15, 110)], added=0)
+        card.additions = [(at(10), 1)]  # a second copy at $100
+        result = Performance([card]).attribution(at(0), at(20))
+        # +$100 for the copy; then +$10 on each of the two.
+        self.assertAlmostEqual(result["acquisitions"], 100)
+        self.assertAlmostEqual(result["market_change"], 20)
+        self.assertEqual(card.held(at(20)), 2)
+        self.assertEqual(card.held(at(5)), 1)
+
+
 class PriceChartingGradingPrices(unittest.TestCase):
     LINK = "https://www.pricecharting.com/game/pokemon-astral-radiance/hoothoot-tg12"
 

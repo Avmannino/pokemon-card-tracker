@@ -43,6 +43,11 @@ class AddCollectionRequest(BaseModel):
     small_hit: bool = False
 
 
+class QuantityRequest(BaseModel):
+    # How many copies you hold now (remove the card to go to zero).
+    quantity: int = Field(ge=1, le=999)
+
+
 class PriceChartingLinkRequest(BaseModel):
     # A raw card's PriceCharting page; empty removes the link.
     url: str | None = Field(default=None, max_length=500)

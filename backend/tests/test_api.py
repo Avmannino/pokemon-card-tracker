@@ -92,6 +92,9 @@ class FakeDB:
     def get_collection_events(self, collection_item_id=None):
         return [e for e in self.events if collection_item_id in (None, e["collection_item_id"])]
 
+    def update_collection_item_quantity(self, item_id, quantity):
+        self.items[item_id]["quantity"] = quantity
+
     def insert_collection_event(self, **event):
         row = {"id": next(self.ids), **event}
         self.events.append(row)
@@ -131,7 +134,7 @@ class ApiTestCase(unittest.TestCase):
             "insert_price_snapshots",
             "get_price_snapshots", "get_collection_events", "insert_collection_event",
             "delete_collection_event", "update_card_variant_siblings",
-            "set_item_variant_confirmed", "set_small_hit",
+            "set_item_variant_confirmed", "set_small_hit", "update_collection_item_quantity",
         ):
             patches.append(mock.patch.object(db, name, getattr(self.fake, name)))
 
@@ -203,6 +206,37 @@ class GradedValuesEndpoint(ApiTestCase):
             json={"source": "PSA CardFacts — Average Price", "source_url": "https://psa.example/x"},
         )
         self.assertEqual(response.status_code, 400)
+
+
+class QuantityEndpoint(ApiTestCase):
+    def events_of(self, item_id, kind):
+        return [e for e in self.fake.events if e["collection_item_id"] == item_id and e["event_type"] == kind]
+
+    def test_more_copies_are_booked_as_an_increase(self):
+        _, item = self.own_reverse_holo_gengar()  # 2 copies
+        response = self.client.patch(f"/api/collection/{item['id']}", json={"quantity": 3})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.fake.items[item["id"]]["quantity"], 3)
+        [increase] = self.events_of(item["id"], "INCREASE")
+        self.assertEqual(increase["quantity"], 1)
+        self.assertAlmostEqual(increase["market_value_per_card"], 8.52)
+        self.assertEqual(self.api_calls, [])
+
+    def test_fewer_copies_are_booked_as_a_removal(self):
+        _, item = self.own_reverse_holo_gengar()
+        response = self.client.patch(f"/api/collection/{item['id']}", json={"quantity": 1})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.fake.items[item["id"]]["quantity"], 1)
+        [removal] = self.events_of(item["id"], "REMOVE")
+        self.assertEqual(removal["quantity"], 1)
+
+    def test_zero_is_refused(self):
+        _, item = self.own_reverse_holo_gengar()
+        self.assertEqual(
+            self.client.patch(f"/api/collection/{item['id']}", json={"quantity": 0}).status_code, 422
+        )
 
 
 class VariantEndpoint(ApiTestCase):

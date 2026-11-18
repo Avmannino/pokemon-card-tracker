@@ -183,7 +183,7 @@ class PriceSeries:
 @dataclass
 class Lot:
     """One collection_items row over its life: added once, then possibly
-    removed a few copies at a time."""
+    more copies added (raising its quantity) or removed a few at a time."""
 
     lot_id: str
     card: dict[str, Any]
@@ -194,6 +194,9 @@ class Lot:
     series: PriceSeries
     add_event: dict[str, Any] | None = None
     remove_events: list[dict[str, Any]] = field(default_factory=list)
+    # Copies added later by raising the quantity: (when, how many).
+    additions: list[tuple[datetime, int]] = field(default_factory=list)
+    addition_events: list[dict[str, Any]] = field(default_factory=list)
     entry_price: float | None = None
     entry_settled_at: datetime | None = None
 
@@ -231,8 +234,9 @@ class Lot:
         if not happened(self.added_at):
             return 0
 
+        added = sum(qty for when, qty in self.additions if happened(when))
         removed = sum(qty for when, qty in self.removals if happened(when))
-        return max(self.quantity - removed, 0)
+        return max(self.quantity + added - removed, 0)
 
     def price(self, moment: datetime) -> float | None:
         if self.entry_settled_at is not None and moment < self.entry_settled_at:
@@ -241,9 +245,13 @@ class Lot:
         return self.series.at(moment)
 
     def flows(self):
-        """(moment, signed market value) for the addition and each removal.
-        A card with no price at all is worth 0 on both sides."""
+        """(moment, signed market value) for the addition, each later
+        addition of copies and each removal. A card with no price at all is
+        worth 0 on both sides."""
         yield self.added_at, self.quantity * (self.price(self.added_at) or 0.0)
+
+        for when, qty in self.additions:
+            yield when, qty * (self.price(when) or 0.0)
 
         for when, qty in self.removals:
             yield when, -qty * (self.price(when) or 0.0)
@@ -494,7 +502,7 @@ def build_lots(
     the lots and how many recorded lots couldn't be valued (no ADD and no
     current row, or a missing card)."""
     history: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"add": None, "removes": []}
+        lambda: {"add": None, "removes": [], "increases": []}
     )
 
     for event in sorted(
@@ -504,6 +512,8 @@ def build_lots(
         record = history[event["collection_item_id"]]
         if event["event_type"] == "ADD":
             record["add"] = record["add"] or event
+        elif event["event_type"] == "INCREASE":
+            record["increases"].append(event)
         else:
             record["removes"].append(event)
 
@@ -515,10 +525,11 @@ def build_lots(
     skipped = 0
 
     for lot_id in lot_ids:
-        record = history.get(lot_id) or {"add": None, "removes": []}
+        record = history.get(lot_id) or {"add": None, "removes": [], "increases": []}
         add = record["add"]
         item = items_by_id.get(lot_id)
         removed = sum(int(event["quantity"]) for event in record["removes"])
+        increased = sum(int(event["quantity"]) for event in record["increases"])
 
         if add is not None:
             card_id = add["card_id"]
@@ -529,7 +540,7 @@ def build_lots(
             card_id = item["card_id"]
             grade = item["ownership_grade"]
             added_at = parse_ts(item["created_at"])
-            quantity = int(item["quantity"]) + removed
+            quantity = int(item["quantity"]) + removed - increased
         else:
             skipped += 1
             continue
@@ -557,6 +568,11 @@ def build_lots(
                 series=series_by_key[key],
                 add_event=add,
                 remove_events=record["removes"],
+                additions=[
+                    (parse_ts(event["occurred_at"]), int(event["quantity"]))
+                    for event in record["increases"]
+                ],
+                addition_events=record["increases"],
             )
         )
 
@@ -598,10 +614,17 @@ def _event_log(lots: list[Lot]) -> list[dict[str, Any]]:
     log = []
 
     for lot in lots:
-        entries = [("ADD", lot.added_at, lot.quantity, lot.add_event)] + [
-            ("REMOVE", when, qty, event)
-            for (when, qty), event in zip(lot.removals, lot.remove_events)
-        ]
+        entries = (
+            [("ADD", lot.added_at, lot.quantity, lot.add_event)]
+            + [
+                ("INCREASE", when, qty, event)
+                for (when, qty), event in zip(lot.additions, lot.addition_events)
+            ]
+            + [
+                ("REMOVE", when, qty, event)
+                for (when, qty), event in zip(lot.removals, lot.remove_events)
+            ]
+        )
 
         for kind, when, qty, stored in entries:
             price = lot.price(when)

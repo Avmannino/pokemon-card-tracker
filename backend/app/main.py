@@ -16,6 +16,7 @@ from .schemas import (
     AddCollectionRequest,
     GradedValuesRequest,
     PriceChartingLinkRequest,
+    QuantityRequest,
     VariantChangeRequest,
 )
 from .services import grading, poketrace, price_sync, pricecharting
@@ -389,6 +390,64 @@ async def add_to_collection(
         "item": serialize_collection_item(item, card),
         "price_error": price_error,
     }
+
+
+@app.patch("/api/collection/{item_id}")
+def set_collection_quantity(item_id: str, request: QuantityRequest) -> dict[str, Any]:
+    """Changes how many copies of this card you hold. Extra copies are booked
+    as cards added (an INCREASE at today's market value) and fewer as cards
+    removed (a REMOVE), exactly like adding or removing them, so the chart
+    never counts a quantity change as a gain or a loss."""
+    item = db.get_collection_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Card not found in your collection.")
+
+    held = int(item["quantity"])
+    target = request.quantity
+    if target == held:
+        return {"quantity": held}
+
+    if target < held:
+        event = _book_removal_or_refuse(item, held - target)
+    else:
+        _ensure_add_event(item)
+        now = datetime.now(timezone.utc)
+        price = lot_price(
+            db.get_price_snapshots(item["card_id"]),
+            item["ownership_grade"],
+            added_at=item["created_at"],
+            moment=now,
+            card=db.get_card(item["card_id"]),
+        )
+        try:
+            event = db.insert_collection_event(
+                collection_item_id=item["id"],
+                card_id=item["card_id"],
+                grade=item["ownership_grade"],
+                event_type="INCREASE",
+                quantity=target - held,
+                occurred_at=now.isoformat(),
+                market_value_per_card=price,
+            )
+        except Exception as exc:
+            if "event_type" in str(exc) or "23514" in str(exc):
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Run supabase/migrations/2026-11-17_quantity_increases.sql "
+                        "in Supabase first, then try again."
+                    ),
+                ) from exc
+            raise
+
+    try:
+        db.update_collection_item_quantity(item_id, target)
+    except Exception:
+        # Keep the history consistent with what's actually in the collection.
+        db.delete_collection_event(event["id"])
+        raise
+
+    return {"quantity": target, "market_value_per_card": event.get("market_value_per_card")}
 
 
 @app.delete("/api/collection/{item_id}")

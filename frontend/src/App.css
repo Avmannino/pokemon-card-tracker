@@ -3599,3 +3599,46 @@ a.manual-source-link:hover {
     grid-column: 1 / -1;
   }
 }
+
+/* Qty column: − 2 + */
+.qty-stepper {
+  display: inline-flex;
+
+  align-items: center;
+
+  gap: 6px;
+}
+
+.qty-stepper button {
+  display: grid;
+
+  place-items: center;
+
+  width: 24px;
+  height: 24px;
+
+  padding: 0;
+
+  border: 1px solid #30394a;
+
+  border-radius: 7px;
+
+  background: #151c28;
+
+  color: #dfe7fb;
+
+  font-size: 0.9rem;
+  font-weight: 700;
+
+  line-height: 1;
+}
+
+.qty-stepper button:hover:not(:disabled) {
+  border-color: #5f82dc;
+}
+
+.qty-stepper .qty-cell {
+  min-width: 18px;
+
+  text-align: center;
+}
