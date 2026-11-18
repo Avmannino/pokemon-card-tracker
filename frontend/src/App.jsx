@@ -410,6 +410,14 @@ function App() {
   const [gradedRefreshing, setGradedRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState(null);
   const watchingSync = useRef(false);
+  // Refresh Prices waits out the server's cooldown after each run (the
+  // scheduled sync counts too); this is when it can run again.
+  const [syncReadyAt, setSyncReadyAt] = useState(0);
+  const [clock, setClock] = useState(() => Date.now());
+  const cooldownMinutes = Math.max(0, Math.ceil((syncReadyAt - clock) / 60000));
+  // What the sync buttons report, shown under them: the page's status area
+  // is far below the dashboard, out of sight.
+  const [syncNotice, setSyncNotice] = useState(null);
   // Also true when the page loads while a graded refresh is running.
   const gradedRunning =
     gradedRefreshing ||
@@ -505,6 +513,26 @@ function App() {
     loadCollection();
     loadRefreshStatus();
   }, []);
+
+  useEffect(() => {
+    const now = Date.now();
+    setClock(now);
+    setSyncReadyAt(now + (refreshStatus?.manual_available_in || 0) * 1000);
+  }, [refreshStatus]);
+
+  // Ticks while Refresh Prices is cooling down, so its countdown moves and
+  // it turns back on by itself.
+  useEffect(() => {
+    if (syncReadyAt <= clock) {
+      return undefined;
+    }
+
+    const timer = setTimeout(
+      () => setClock(Date.now()),
+      Math.min(syncReadyAt - clock, 15000)
+    );
+    return () => clearTimeout(timer);
+  }, [syncReadyAt, clock]);
 
   const ownedTotal = useMemo(
     () => collection.summary?.known_market_total || 0,
@@ -976,8 +1004,7 @@ function App() {
   // Your PSA prices re-read from their PriceCharting pages. Nothing else
   // ever triggers this.
   async function handleGradedRefresh() {
-    setError("");
-    setMessage("");
+    setSyncNotice(null);
     setGradedRefreshing(true);
 
     try {
@@ -985,15 +1012,18 @@ function App() {
         await startGradedRefresh();
       } catch (err) {
         // "Already running" from the server.
-        setError(err.message);
+        setSyncNotice({ tone: "error", text: err.message });
         loadRefreshStatus();
         return;
       }
 
       const status = await watchSync();
-      setMessage(gradedRefreshSummary(status));
+      setSyncNotice({
+        tone: status?.pricecharting?.error ? "error" : "success",
+        text: gradedRefreshSummary(status),
+      });
     } catch (err) {
-      setError(err.message);
+      setSyncNotice({ tone: "error", text: err.message });
     } finally {
       setGradedRefreshing(false);
     }
@@ -1001,23 +1031,25 @@ function App() {
 
   // Manual sync: pulls fresh prices now, on top of the twice-daily schedule.
   async function handleSyncNow() {
-    setError("");
-    setMessage("");
+    setSyncNotice(null);
 
     try {
       await startSync();
     } catch (err) {
       // Includes "already running" and the cooldown message from the server.
-      setError(err.message);
+      setSyncNotice({ tone: "error", text: err.message });
       loadRefreshStatus();
       return;
     }
 
     try {
       const status = await watchSync();
-      setMessage(syncSummary(status));
+      setSyncNotice({
+        tone: status?.manual?.error ? "error" : "success",
+        text: syncSummary(status),
+      });
     } catch (err) {
-      setError(err.message);
+      setSyncNotice({ tone: "error", text: err.message });
     }
   }
 
@@ -1674,9 +1706,18 @@ function App() {
                 type="button"
                 className="sync-button primary"
                 onClick={handleSyncNow}
-                disabled={syncing}
+                disabled={syncing || cooldownMinutes > 0}
+                title={
+                  cooldownMinutes > 0
+                    ? "Prices were synced recently. Refresh Prices can run once every 15 minutes."
+                    : undefined
+                }
               >
-                {syncing && !gradedRunning && !smallHitsRunning ? "Syncing…" : "Refresh Prices"}
+                {syncing && !gradedRunning && !smallHitsRunning
+                  ? "Syncing…"
+                  : cooldownMinutes > 0
+                    ? `Refresh in ${cooldownMinutes} min`
+                    : "Refresh Prices"}
               </button>
 
               <button
@@ -1698,6 +1739,12 @@ function App() {
                 {smallHitsRunning ? "Syncing…" : "Sync Small Hits"}
               </button>
             </div>
+
+            {syncNotice && (
+              <small className={`refresh-notice ${syncNotice.tone}`} role="status">
+                {syncNotice.text}
+              </small>
+            )}
 
             <small>{refreshStatusText(refreshStatus)}</small>
             <small>{gradedRefreshText(refreshStatus)}</small>

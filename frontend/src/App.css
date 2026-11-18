@@ -951,6 +951,22 @@ h2 {
   font-size: 0.72rem;
 }
 
+.refresh-control .refresh-notice {
+  max-width: 420px;
+
+  font-size: 0.78rem;
+
+  text-align: right;
+}
+
+.refresh-control .refresh-notice.success {
+  color: #5fe3a4;
+}
+
+.refresh-control .refresh-notice.error {
+  color: #f2a4a4;
+}
+
 .search-form {
   display: grid;
 
@@ -2421,6 +2437,12 @@ a.manual-source-link:hover {
     width: 100%;
 
     align-items: stretch;
+  }
+
+  .refresh-control .refresh-notice {
+    max-width: none;
+
+    text-align: left;
   }
 
   .refresh-buttons {
