@@ -3547,3 +3547,140 @@ a.manual-source-link:hover {
 
   text-align: center;
 }
+
+.mobile-sort {
+  display: none;
+}
+
+/* Phones: the collection, Small Hits and Grading Opportunities tables turn
+   each row into a card - the card on top, its numbers in a labeled grid,
+   actions at the bottom - instead of scrolling sideways. */
+@media (max-width: 620px) {
+  .collection-scroll {
+    overflow-x: visible;
+  }
+
+  .collection-table,
+  .grading-table {
+    min-width: 0;
+  }
+
+  .collection-table thead {
+    display: none;
+  }
+
+  .collection-table,
+  .collection-table tbody {
+    display: block;
+  }
+
+  .collection-table tbody tr {
+    display: grid;
+
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    gap: 10px 14px;
+
+    margin-bottom: 12px;
+
+    padding: 14px;
+
+    border: 1px solid #252d3c;
+
+    border-radius: 14px;
+
+    background: #10151f;
+  }
+
+  .collection-table tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .collection-table tbody td,
+  .collection-table tbody tr:last-child td {
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: flex-start;
+
+    gap: 3px;
+
+    min-width: 0;
+
+    padding: 0;
+
+    border: 0;
+  }
+
+  .collection-table td[data-label]::before {
+    content: attr(data-label);
+
+    color: #737f93;
+
+    font-size: 0.66rem;
+    font-weight: 700;
+
+    letter-spacing: 0.05em;
+
+    text-transform: uppercase;
+  }
+
+  .collection-table td.cell-card,
+  .collection-table td.cell-actions,
+  .collection-table td.cell-wide {
+    grid-column: 1 / -1;
+  }
+
+  .collection-table .table-card-cell {
+    min-width: 0;
+  }
+
+  .collection-table td.cell-actions {
+    padding-top: 10px;
+
+    border-top: 1px solid #1c232f;
+  }
+
+  .collection-table td.cell-actions .action-stack {
+    flex-direction: row;
+
+    flex-wrap: wrap;
+
+    gap: 6px 14px;
+  }
+
+  .mobile-sort {
+    display: flex;
+
+    gap: 8px;
+
+    width: 100%;
+  }
+
+  .mobile-sort select {
+    flex: 1;
+
+    min-width: 0;
+
+    padding: 10px 12px;
+
+    border: 1px solid #30394a;
+
+    border-radius: 12px;
+
+    background: #0c111a;
+
+    color: #f4f7ff;
+  }
+
+  .mobile-sort button {
+    padding: 0 14px;
+
+    border-radius: 12px;
+  }
+
+  .collection-search {
+    flex-wrap: wrap;
+  }
+}

@@ -1475,7 +1475,7 @@ function App() {
               <tbody>
                 {rows.map((item) => (
                   <tr key={item.id}>
-                    <td>
+                    <td className="cell-card">
                       <div className="table-card-cell">
                         <ItemImage
                           item={item}
@@ -1518,7 +1518,7 @@ function App() {
                       </div>
                     </td>
 
-                    <td>
+                    <td data-label="Qty">
                       <div className="qty-stepper">
                         <button
                           type="button"
@@ -1546,7 +1546,7 @@ function App() {
                       </div>
                     </td>
 
-                    <td>
+                    <td data-label="Market value">
                       <div className="price-cell">
                         <strong>
                           {money(
@@ -1602,7 +1602,7 @@ function App() {
 
                     {COLLECTION_COLUMNS.filter((column) => column.window).map(
                       (column) => (
-                        <td key={column.key}>
+                        <td key={column.key} data-label={column.label}>
                           <ChangeCell
                             change={item.owned_grade_changes?.[column.window]}
                             window={column.window}
@@ -1611,7 +1611,7 @@ function App() {
                       )
                     )}
 
-                    <td>
+                    <td data-label="You own">
                       <div className="owned-cell">
                         <strong>
                           {gradeLabel(
@@ -1621,7 +1621,7 @@ function App() {
                       </div>
                     </td>
 
-                    <td>
+                    <td data-label="Your value">
                       <strong>
                         {money(
                           item.owned_market_value_total
@@ -1629,7 +1629,7 @@ function App() {
                       </strong>
                     </td>
 
-                    <td>
+                    <td className="cell-actions">
                       <div className="action-stack">
                         <button
                           type="button"
@@ -1829,6 +1829,36 @@ function App() {
                 {regularItems.length}
               </span>
             )}
+            <div className="mobile-sort">
+              <select
+                value={sort.key}
+                onChange={(event) => {
+                  const column = COLLECTION_COLUMNS.find((each) => each.key === event.target.value);
+                  setSort({ key: column.key, direction: column.numeric ? "desc" : "asc" });
+                }}
+                aria-label="Sort by"
+              >
+                {COLLECTION_COLUMNS.filter((column) => column.key).map((column) => (
+                  <option key={column.key} value={column.key}>
+                    Sort: {column.label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="secondary-button"
+                aria-label={sort.direction === "asc" ? "Ascending" : "Descending"}
+                onClick={() =>
+                  setSort((current) => ({
+                    ...current,
+                    direction: current.direction === "asc" ? "desc" : "asc",
+                  }))
+                }
+              >
+                {sort.direction === "asc" ? "↑" : "↓"}
+              </button>
+            </div>
           </div>
         )}
 

@@ -107,7 +107,10 @@ function LabelPill({ row }) {
 
 function LinkCell({ row, onEditLink }) {
   return (
-    <td className="grading-link-cell" onClick={(event) => event.stopPropagation()}>
+    <td
+      className="grading-link-cell cell-actions"
+      onClick={(event) => event.stopPropagation()}
+    >
       {row.pricecharting_url ? (
         <>
           <a href={row.pricecharting_url} target="_blank" rel="noreferrer">
@@ -151,7 +154,7 @@ function OpportunityTable({ rows, onZoom, onEditLink }) {
               className="grading-row"
               onClick={() => onZoom(row.card, zoomDetails(row))}
             >
-              <td>
+              <td className="cell-card">
                 <div className="table-card-cell">
                   {row.card.image_url && <img src={row.card.image_url} alt="" />}
 
@@ -167,34 +170,34 @@ function OpportunityTable({ rows, onZoom, onEditLink }) {
                 </div>
               </td>
 
-              <td>{money(row.raw_value)}</td>
+              <td data-label="Raw">{money(row.raw_value)}</td>
 
               {row.available ? (
                 <>
-                  <td>
+                  <td data-label="PSA 9">
                     {money(row.psa9_value)}
                     {row.psa9_multiple !== null && (
                       <span className="grading-sub">{multiple(row.psa9_multiple)}</span>
                     )}
                   </td>
-                  <td>
+                  <td data-label="PSA 10">
                     {money(row.psa10_value)}
                     <span className="grading-sub">{multiple(row.psa10_multiple)}</span>
                   </td>
-                  <td>
+                  <td data-label="PSA 10 premium">
                     {signedMoney(row.psa10_premium)}
                     <span className="grading-sub">
                       {row.psa10_premium_pct !== null ? `${row.psa10_premium_pct.toFixed(0)}%` : ""}
                     </span>
                   </td>
-                  <td className={tone(row.psa10_net)}>{signedMoney(row.psa10_net)}</td>
-                  <td className={tone(row.psa9_net)}>{signedMoney(row.psa9_net)}</td>
-                  <td>
+                  <td data-label="PSA 10 net" className={tone(row.psa10_net)}>{signedMoney(row.psa10_net)}</td>
+                  <td data-label="PSA 9 net" className={tone(row.psa9_net)}>{signedMoney(row.psa9_net)}</td>
+                  <td data-label="Score">
                     <strong>{row.score}</strong>
                   </td>
                 </>
               ) : (
-                <td colSpan={6} className="grading-unavailable">
+                <td colSpan={6} className="grading-unavailable cell-wide">
                   {row.unavailable_reason}
                 </td>
               )}
