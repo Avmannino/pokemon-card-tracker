@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   checkGradingCard,
@@ -129,9 +129,45 @@ function LinkCell({ row, onEditLink }) {
   );
 }
 
-function OpportunityTable({ rows, onZoom, onEditLink }) {
+// On phones, where each row is a card, `visibleRows` limits how many show at
+// once; the rest scroll. The height is measured from the rendered cards,
+// since their height varies.
+function useVisibleRows(scrollRef, visibleRows, rows) {
+  useLayoutEffect(() => {
+    const box = scrollRef.current;
+    if (!box) {
+      return undefined;
+    }
+
+    function measure() {
+      const cards = box.querySelectorAll("tbody tr");
+      const phone = window.matchMedia("(max-width: 620px)").matches;
+
+      if (!visibleRows || !phone || cards.length <= visibleRows) {
+        box.style.maxHeight = "";
+        return;
+      }
+
+      const first = cards[0];
+      const last = cards[visibleRows - 1];
+      box.style.maxHeight = `${last.offsetTop + last.offsetHeight - first.offsetTop + 2}px`;
+    }
+
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [scrollRef, visibleRows, rows]);
+}
+
+function OpportunityTable({ rows, onZoom, onEditLink, visibleRows }) {
+  const scrollRef = useRef(null);
+  useVisibleRows(scrollRef, visibleRows, rows);
+
   return (
-    <div className="collection-scroll">
+    <div
+      className={`collection-scroll ${visibleRows ? "grading-scroll" : ""}`}
+      ref={scrollRef}
+    >
       <table className="collection-table grading-table">
         <thead>
           <tr>
@@ -572,7 +608,16 @@ function GradingOpportunities({ refreshKey, onZoom }) {
 
       {linkMessage && !showAll && <div className="status success">{linkMessage}</div>}
 
-      {top.length > 0 && <OpportunityTable rows={top} onZoom={onZoom} onEditLink={editLink} />}
+      {top.length > 0 && (
+        <>
+          <OpportunityTable rows={top} onZoom={onZoom} onEditLink={editLink} visibleRows={2} />
+          {top.length > 2 && (
+            <small className="sync-more grading-more">
+              {top.length - 2} more · scroll the list, or View all for every card
+            </small>
+          )}
+        </>
+      )}
 
       <p className="analytics-note">
         Market opportunity only. Actual grade depends on card condition.

@@ -3709,3 +3709,36 @@ a.manual-source-link:hover {
 
   font-size: 0.72rem;
 }
+
+.grading-more {
+  display: none;
+}
+
+/* Grading Opportunities on phones: numbers and labels centered, and the
+   top list shows two cards at a time (the rest scroll; see
+   useVisibleRows in GradingOpportunities.jsx). */
+@media (max-width: 620px) {
+  .grading-table tbody td[data-label],
+  .grading-table tbody td.cell-actions,
+  .grading-table tbody td.cell-wide {
+    align-items: center;
+
+    text-align: center;
+  }
+
+  .grading-table tbody td.cell-actions {
+    flex-direction: row;
+
+    justify-content: center;
+
+    gap: 12px;
+  }
+
+  .grading-scroll {
+    overflow-y: auto;
+  }
+
+  .grading-more {
+    display: block;
+  }
+}
