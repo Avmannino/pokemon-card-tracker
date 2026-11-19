@@ -3796,3 +3796,23 @@ a.manual-source-link:hover {
     font-size: 1.25rem;
   }
 }
+
+/* Add a card: a yellow panel. The heading and notes on it are dark; the
+   search box, results and buttons keep their own dark backgrounds. */
+.search-panel {
+  border-color: #d9ad00;
+
+  background: #f1c102;
+}
+
+.search-panel h2 {
+  color: #1b1500;
+}
+
+.search-panel .search-sort-note {
+  color: #3d3300;
+}
+
+.search-panel .search-form input {
+  border-color: #b38f00;
+}
