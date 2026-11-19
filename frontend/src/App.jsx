@@ -1755,8 +1755,7 @@ function App() {
       <section className="search-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">ADD A CARD</p>
-            <h2>Search Pokémon cards</h2>
+            <h2>Add a card</h2>
           </div>
 
         </div>
