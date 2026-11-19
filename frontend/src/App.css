@@ -3816,3 +3816,38 @@ a.manual-source-link:hover {
 .search-panel .search-form input {
   border-color: #b38f00;
 }
+
+/* Cards inside a section card are a step lighter than the section, so each
+   item stands out from its panel. */
+.mover-entry,
+.gallery-card {
+  border-color: #2a3446;
+
+  background: #172030;
+}
+
+.performance-card {
+  border-color: #2a3446;
+
+  background: linear-gradient(145deg, #1b2434, #151c29);
+}
+
+.grading-checker {
+  border-color: #283245;
+
+  background: #141b27;
+}
+
+.checker-grid div {
+  border-color: #2a3446;
+
+  background: #1b2433;
+}
+
+@media (max-width: 620px) {
+  .collection-table tbody tr {
+    border-color: #2a3446;
+
+    background: #172030;
+  }
+}
