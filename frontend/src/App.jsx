@@ -390,7 +390,10 @@ function App() {
 
   const [query, setQuery] = useState("");
   const [collectionQuery, setCollectionQuery] = useState("");
-  const [collectionView, setCollectionView] = useState("table");
+  // Phones start on the gallery, which fits a narrow screen better.
+  const [collectionView, setCollectionView] = useState(() =>
+    window.matchMedia?.("(max-width: 620px)").matches ? "gallery" : "table"
+  );
   const [sort, setSort] = useState({ key: "value", direction: "desc" });
   const searchInputRef = useRef(null);
   const [searchResults, setSearchResults] = useState([]);
@@ -981,7 +984,15 @@ function App() {
         setError(`Enter a whole number from 1 to ${item.quantity}.`);
         return;
       }
-    } else if (!window.confirm("Remove this card from your collection?")) {
+    }
+
+    const place = item.small_hit ? "Small Hits" : "your collection";
+    const what =
+      quantity === item.quantity && quantity === 1
+        ? cardTitle(item.card)
+        : `${quantity} ${quantity === 1 ? "copy" : "copies"} of ${cardTitle(item.card)}`;
+
+    if (!window.confirm(`Are you sure you want to remove ${what} from ${place}?`)) {
       return;
     }
 
