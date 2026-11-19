@@ -425,22 +425,17 @@ graded grades carry over, since they describe the card you own.
 
 ---
 
-## Portfolio Change and Grading Opportunities
+## Portfolio performance and Grading Opportunities
 
-**Portfolio Change** (now shown as the chart and its performance boxes;
-splits the change in your collection's value into:
-
-- **Market movement:** price changes of cards while you held them, and only
-  while you held them.
-- **Cards added:** each at its market value when added. A second copy is
-  its own addition.
-- **Cards removed:** each at its market value when removed (negative).
-
-`total change = market movement + cards added + cards removed`. It uses the
-same ownership history (`collection_events`) and prices as the chart, so
-market movement always matches the chart's change. **Biggest Portfolio
-Contributors** lists the cards whose price moves added or took away the
-most dollars (price change x copies held).
+The chart and the performance boxes above it (Today, Past Week, Past
+Month, All Time) show market performance only: price changes of cards
+while you held them. Cards added count at their market value when added,
+and cards removed at their value when removed, so neither ever shows as
+a gain or loss. Behind the scenes each range is split into
+`total change = market movement + cards added + cards removed`, from the
+ownership history (`collection_events`). **Biggest Portfolio Contributors**
+(under the chart, for its selected range) lists the cards whose price
+moves added or took away the most dollars (price change x copies held).
 
 **Grading Opportunities** ranks the raw cards you own by what a PSA 10 and
 a PSA 9 would be worth over the raw card plus a grading cost ($30 by
