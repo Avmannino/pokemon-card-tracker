@@ -23,7 +23,7 @@ const PERFORMANCE_WINDOWS = [
   { key: "1D", label: "Today" },
   { key: "1W", label: "Past Week" },
   { key: "1M", label: "Past Month" },
-  { key: "3M", label: "Past 3 Months" },
+  { key: "ALL", label: "All Time" },
 ];
 
 // Reported on each biggest-mover entry.
