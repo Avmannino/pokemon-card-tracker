@@ -721,11 +721,6 @@ function Dashboard({ refreshKey, actions }) {
 
       </div>
 
-      {/* Which cards' price moves mattered most, all time. */}
-      <div className="attribution-row">
-        <Contributors attribution={data.ranges?.ALL?.attribution} range="ALL" onZoom={openZoom} />
-      </div>
-
       <SyncSummary sync={data.last_sync} onZoom={openZoom} />
 
       <div className="movers-split">
@@ -788,6 +783,11 @@ function Dashboard({ refreshKey, actions }) {
             </section>
           );
         })}
+      </div>
+
+      {/* Which cards' price moves mattered most, all time. */}
+      <div className="attribution-row">
+        <Contributors attribution={data.ranges?.ALL?.attribution} range="ALL" onZoom={openZoom} />
       </div>
 
       <GradingOpportunities refreshKey={refreshKey} onZoom={openZoom} />
