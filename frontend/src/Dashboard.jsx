@@ -418,6 +418,10 @@ function LineChart({ points, hoveredIndex, onHover, formatLabel, formatAxis }) {
 // One side of the Last Syncs card: what one sync changed, card by card.
 // Only cards whose price moved are listed (the backend leaves out ones
 // re-priced at the same value).
+// Each Last Syncs list shows this many changes at a time and scrolls for
+// the rest (the height is set in App.css: .sync-section .sync-summary-list).
+const SYNC_ROWS_SHOWN = 3;
+
 function SyncChanges({ title, syncedLabel, notYet, section, onZoom }) {
   const changes = section?.changes || [];
   const tone = (value) => (value >= 0 ? "positive" : "negative");
@@ -485,6 +489,12 @@ function SyncChanges({ title, syncedLabel, notYet, section, onZoom }) {
             ))}
           </div>
         )
+      )}
+
+      {changes.length > SYNC_ROWS_SHOWN && (
+        <small className="sync-more">
+          {changes.length - SYNC_ROWS_SHOWN} more · scroll the list
+        </small>
       )}
     </div>
   );

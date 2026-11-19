@@ -2414,9 +2414,19 @@ a.manual-source-link:hover {
     padding: 18px;
   }
 
-  .performance-row,
   .movers-split {
     grid-template-columns: 1fr;
+  }
+
+  /* Today / Week / Month / All Time in a 2 x 2 grid. */
+  .performance-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    gap: 8px;
+  }
+
+  .performance-card {
+    padding: 12px;
   }
 
   .chart-card,
@@ -3683,4 +3693,19 @@ a.manual-source-link:hover {
   .collection-search {
     flex-wrap: wrap;
   }
+}
+
+/* Last Syncs lists: three changes visible at a time (each row is ~59px:
+   a 48px card + 10px padding + 1px border; 10px between rows), the rest
+   scrolls. Matches SYNC_ROWS_SHOWN in Dashboard.jsx. */
+.sync-section .sync-summary-list {
+  max-height: 198px;
+}
+
+.sync-more {
+  margin-top: 8px;
+
+  color: #737f93;
+
+  font-size: 0.72rem;
 }
