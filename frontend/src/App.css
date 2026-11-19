@@ -3106,132 +3106,26 @@ a.manual-source-link:hover {
 .attribution-row {
   display: grid;
 
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 
   gap: 16px;
 
   margin-top: 20px;
 }
 
-.attribution-stats {
-  display: grid;
 
-  grid-template-columns: repeat(4, minmax(0, 1fr));
 
-  gap: 10px;
 
-  margin-top: 14px;
-}
 
-.attribution-stat {
-  display: flex;
 
-  flex-direction: column;
 
-  gap: 3px;
 
-  min-width: 0;
 
-  padding: 12px;
 
-  border: 1px solid #1c232f;
 
-  border-radius: 12px;
 
-  background: #10151f;
-}
 
-.attribution-stat span {
-  color: #737f93;
 
-  font-size: 0.72rem;
-  font-weight: 700;
-
-  letter-spacing: 0.04em;
-
-  text-transform: uppercase;
-}
-
-.attribution-stat strong {
-  font-size: 1.15rem;
-
-  font-variant-numeric: tabular-nums;
-}
-
-.attribution-stat small {
-  color: #717d91;
-
-  font-size: 0.72rem;
-}
-
-.waterfall {
-  display: flex;
-
-  flex-direction: column;
-
-  gap: 8px;
-
-  margin-top: 16px;
-}
-
-.waterfall-row {
-  display: grid;
-
-  grid-template-columns: 70px minmax(0, 1fr) 96px;
-
-  gap: 10px;
-
-  align-items: center;
-}
-
-.waterfall-label {
-  color: #9099aa;
-
-  font-size: 0.76rem;
-}
-
-.waterfall-track {
-  position: relative;
-
-  height: 14px;
-
-  border-radius: 7px;
-
-  background: #141a26;
-}
-
-.waterfall-bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-
-  border-radius: 7px;
-
-  background: #3d4b66;
-}
-
-.waterfall-bar.total {
-  background: #4a6fce;
-}
-
-.waterfall-bar.positive {
-  background: #2f9e6c;
-}
-
-.waterfall-bar.negative {
-  background: #c45656;
-}
-
-.waterfall-value {
-  color: #e9edf7;
-
-  font-size: 0.8rem;
-  font-weight: 700;
-
-  font-variant-numeric: tabular-nums;
-
-  text-align: right;
-}
 
 .contributors-panel .sync-summary-list {
   max-height: 330px;
@@ -3420,22 +3314,11 @@ a.manual-source-link:hover {
 }
 
 @media (max-width: 900px) {
-  .attribution-row {
-    grid-template-columns: 1fr;
-  }
-
-  .attribution-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 620px) {
   .analytics-panel {
     padding: 16px;
-  }
-
-  .waterfall-row {
-    grid-template-columns: 58px minmax(0, 1fr) 84px;
   }
 }
 

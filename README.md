@@ -427,7 +427,7 @@ graded grades carry over, since they describe the card you own.
 
 ## Portfolio Change and Grading Opportunities
 
-**Portfolio Change** (under the chart, for the chart's selected range)
+**Portfolio Change** (now shown as the chart and its performance boxes;
 splits the change in your collection's value into:
 
 - **Market movement:** price changes of cards while you held them, and only

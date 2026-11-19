@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { getPortfolioDashboard } from "./api.js";
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import GradingOpportunities from "./GradingOpportunities.jsx";
-import { Contributors, PortfolioChange } from "./PortfolioChange.jsx";
+import { Contributors } from "./Contributors.jsx";
 import { money, percent, cardTitle, gradeLabel } from "./format.js";
 
 const CHART_RANGES = [
@@ -721,10 +721,8 @@ function Dashboard({ refreshKey, actions }) {
 
       </div>
 
-      {/* Follows the chart's range: why the value changed, and which
-          cards' price moves mattered most. */}
+      {/* Follows the chart's range: which cards' price moves mattered most. */}
       <div className="attribution-row">
-        <PortfolioChange attribution={rangeData?.attribution} range={range} />
         <Contributors attribution={rangeData?.attribution} range={range} onZoom={openZoom} />
       </div>
 
