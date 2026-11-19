@@ -434,7 +434,7 @@ and cards removed at their value when removed, so neither ever shows as
 a gain or loss. Behind the scenes each range is split into
 `total change = market movement + cards added + cards removed`, from the
 ownership history (`collection_events`). **Biggest Portfolio Contributors**
-(under the chart, for its selected range) lists the cards whose price
+(under the chart, all time) lists the cards whose price
 moves added or took away the most dollars (price change x copies held).
 
 **Grading Opportunities** ranks the raw cards you own by what a PSA 10 and

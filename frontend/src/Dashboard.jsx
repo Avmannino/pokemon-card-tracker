@@ -721,9 +721,9 @@ function Dashboard({ refreshKey, actions }) {
 
       </div>
 
-      {/* Follows the chart's range: which cards' price moves mattered most. */}
+      {/* Which cards' price moves mattered most, all time. */}
       <div className="attribution-row">
-        <Contributors attribution={rangeData?.attribution} range={range} onZoom={openZoom} />
+        <Contributors attribution={data.ranges?.ALL?.attribution} range="ALL" onZoom={openZoom} />
       </div>
 
       <SyncSummary sync={data.last_sync} onZoom={openZoom} />
