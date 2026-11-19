@@ -3742,3 +3742,57 @@ a.manual-source-link:hover {
     display: block;
   }
 }
+
+/* The enlarged card on phones: a smaller card (or slab) so it and its
+   details fit on screen together, and the close button inside the frame. */
+@media (max-width: 620px) {
+  .card-zoom {
+    gap: 10px;
+
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+  }
+
+  .card-zoom > img {
+    width: auto;
+    max-width: 64%;
+    max-height: 40vh;
+
+    border-radius: 12px;
+  }
+
+  .card-zoom .drawn-slab {
+    width: min(180px, 52vw);
+
+    gap: 6px;
+
+    padding: 9px;
+
+    border-radius: 12px;
+  }
+
+  .card-zoom-close {
+    top: 4px;
+    right: 4px;
+
+    z-index: 1;
+  }
+
+  .card-zoom figcaption strong {
+    font-size: 0.95rem;
+  }
+
+  .card-zoom figcaption span {
+    font-size: 0.78rem;
+  }
+
+  .card-zoom-price {
+    margin-top: 6px;
+
+    padding: 8px 14px;
+  }
+
+  .card-zoom figcaption .card-zoom-price strong {
+    font-size: 1.25rem;
+  }
+}
