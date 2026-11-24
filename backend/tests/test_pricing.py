@@ -621,6 +621,41 @@ class SmallHitsFollowValue(unittest.TestCase):
         )
 
 
+class SearchRanking(unittest.IsolatedAsyncioTestCase):
+    async def test_number_searches_find_the_padded_number_and_rank_it_first(self):
+        def card(card_id, name, number, set_name):
+            return {"id": card_id, "name": name, "cardNumber": number,
+                    "set": {"name": set_name, "slug": set_name.lower()}, "prices": {}}
+
+        pages = {
+            "pikachu 28": [
+                card("go", "Pikachu (28)", "028/078", "Pokemon GO"),
+                card("amph", "Ampharos - Pikachu 28", "109", "Battle Academy 2024"),
+                card("old", "Pikachu", "28/73", "Shining Legends"),
+            ],
+            # The padded search reaches the newer set's card.
+            "pikachu 028": [card("new", "Pikachu", "028/128", "ME: 30th Celebration")],
+        }
+        searched = []
+
+        async def fake_pages(text, count):
+            searched.append((text, count))
+            return pages.get(text, [])
+
+        with mock.patch.object(poketrace, "_search_pages", fake_pages):
+            results = await poketrace.search_cards("pikachu 28")
+
+        self.assertEqual(searched, [("pikachu 28", 1), ("pikachu 028", 2)])
+        ids = [result["poketrace_id"] for result in results]
+        # Every #28 Pikachu before the Ampharos card; newest set first.
+        self.assertEqual(ids[0], "new")
+        self.assertEqual(ids[-1], "amph")
+
+    def test_query_split(self):
+        self.assertEqual(poketrace._split_query("Pikachu 028/128"), (["pikachu"], ["028"]))
+        self.assertEqual(poketrace._split_query("hoothoot tg12"), (["hoothoot"], ["tg12"]))
+
+
 PRICE_GUIDE = """
 <div id="full-prices"><table>
   <tr><td>Grade 8</td><td class="price js-price">$14.00</td></tr>

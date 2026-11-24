@@ -141,7 +141,7 @@ async def search(
         return {"results": cached[1]}
 
     try:
-        cards = await poketrace.search_cards(q.strip(), limit=20)
+        cards = await poketrace.search_cards(q.strip())
     except poketrace.PokeTraceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

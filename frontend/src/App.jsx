@@ -1268,10 +1268,9 @@ function App() {
         {searchResults.length > 0 && (
           <>
             <div className="search-sort-note">
-              Your top 2 matches for this search are pinned
-              first, then the rest are sorted by current raw
-              market value, highest to lowest. Printed rarity
-              is used as a fallback when pricing is unavailable.
+              Best matches first: card number, then name, then set (so
+              "pikachu 28" or "glaceon gx 159" finds the exact card). Among
+              equal matches, the newest set comes first.
             </div>
 
             <div className="search-results-viewport">

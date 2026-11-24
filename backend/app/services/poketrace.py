@@ -17,6 +17,7 @@ against live responses:
 """
 
 import asyncio
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -420,38 +421,120 @@ def match_exact(
     return remote, None
 
 
-async def search_cards(query: str, limit: int = 20) -> list[dict[str, Any]]:
-    payload = await _request(
-        "/cards",
-        params={
-            "search": query,
-            "market": "US",
-            "product_type": "single",
-            "limit": min(max(limit, 1), 20),
-        },
+# A search with a card number also looks for it zero-padded ("28" -> "028",
+# how modern sets number their cards) and reads this many result pages for
+# it, since PokeTrace's own ranking can leave the card past the first 20.
+NUMBER_SEARCH_PAGES = 2
+MAX_SEARCH_RESULTS = 40
+
+_NUMBER = re.compile(r"^#?(\d+)(?:/\w+)?$")
+_PROMO_NUMBER = re.compile(r"^[a-z]{1,6}\d{1,4}$")
+
+
+def _split_query(query: str) -> tuple[list[str], list[str]]:
+    """(words, card numbers) in a search: "pikachu 028/128" -> (["pikachu"],
+    ["028"]); promo-style numbers like "tg12" or "swsh086" count as numbers."""
+    words, numbers = [], []
+    for token in query.lower().split():
+        match = _NUMBER.match(token)
+        if match:
+            numbers.append(match.group(1))
+        elif _PROMO_NUMBER.match(token) and any(ch.isdigit() for ch in token):
+            numbers.append(token)
+        else:
+            words.append(token)
+    return words, numbers
+
+
+def _number_base(card_number: str | None) -> str:
+    """"028/128" -> "28", "TG12/TG30" -> "tg12"."""
+    base = (card_number or "").split("/")[0].strip().lower()
+    return base.lstrip("0") or base
+
+
+def _relevance(
+    card: dict[str, Any],
+    words: list[str],
+    numbers: list[str],
+    full_number: str | None = None,
+) -> int:
+    """How well a result matches the search: its card number, the words in
+    its name, then words in its set name (e.g. "30th celebration")."""
+    name = (card.get("name") or "").lower()
+    set_name = (card.get("set_name") or "").lower()
+    score = 0
+
+    if numbers and _number_base(card.get("card_number")) in {
+        number.lstrip("0") or number for number in numbers
+    }:
+        score += 50
+
+    name_hits = [word for word in words if word in name]
+    score += 10 * len(name_hits)
+    score += 6 * sum(1 for word in words if word not in name and word in set_name)
+
+    if words and name.split(" (")[0].split(" - ")[0].strip() == " ".join(name_hits):
+        score += 5  # "pikachu" over "Pikachu V-UNION", "Ampharos - Pikachu 28"
+
+    if full_number and (card.get("card_number") or "").lower() == full_number:
+        score += 20  # "028/128" typed in full
+
+    return score
+
+
+async def _search_pages(query: str, pages: int) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    cursor = None
+
+    for _ in range(pages):
+        params = {"search": query, "market": "US", "product_type": "single", "limit": 20}
+        if cursor:
+            params["cursor"] = cursor
+        payload = await _request("/cards", params=params)
+        found.extend(payload.get("data", []))
+        cursor = (payload.get("pagination") or {}).get("nextCursor")
+        if not cursor:
+            break
+
+    return found
+
+
+async def search_cards(query: str, limit: int = MAX_SEARCH_RESULTS) -> list[dict[str, Any]]:
+    """Cards matching a search, best match first.
+
+    PokeTrace's own order favors older sets and matches numbers only as
+    text, so "pikachu 28" missed Pikachu 028/128. When the search has a card
+    number (2+ digits), its zero-padded form is searched too, two pages deep
+    - one to three PokeTrace requests, versus one for a plain name search.
+    Results are then ranked by how well they match (number, name, set),
+    newest printing first among equals."""
+    words, numbers = _split_query(query)
+    searches = {query: 1}
+
+    for number in numbers:
+        digits = number.lstrip("0")
+        if number.isdigit() and len(digits) >= 2:
+            padded = " ".join(words + [digits.zfill(3)])
+            searches[padded] = NUMBER_SEARCH_PAGES
+
+    raw: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for text, pages in searches.items():
+        for card in await _search_pages(text, pages):
+            if card.get("id") not in seen:
+                seen.add(card.get("id"))
+                raw.append(card)
+
+    full_number = next((token for token in query.lower().split() if "/" in token), None)
+    cards = [normalize_card(card) for card in raw]
+    # Equal matches: the one PokeTrace lists later first. It lists sets
+    # oldest first, so that puts the newest printing (usually the card you
+    # just pulled) on top.
+    ranked = sorted(
+        enumerate(cards),
+        key=lambda pair: (-_relevance(pair[1], words, numbers, full_number), -pair[0]),
     )
-
-    cards = [
-        normalize_card(card)
-        for card in payload.get("data", [])
-    ]
-
-    # PokeTrace returns "/cards?search=" results in relevance order for the
-    # query text. Pin its top two matches to the front so an exact/close
-    # name match never gets buried under a pricier but less relevant card,
-    # then value-sort everything else as before.
-    most_relevant, remaining = cards[:2], cards[2:]
-
-    remaining.sort(
-        key=lambda card: (
-            card.get("raw_market_estimate") is not None,
-            card.get("raw_market_estimate") or 0,
-            card.get("rarity_score") or 0,
-        ),
-        reverse=True,
-    )
-
-    return most_relevant + remaining
+    return [card for _, card in ranked][:limit]
 
 
 async def get_card(poketrace_id: str, reserve: int = MIN_REMAINING) -> dict[str, Any]:
