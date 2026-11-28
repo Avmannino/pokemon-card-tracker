@@ -212,3 +212,9 @@ create index if not exists idx_sports_value_history_recorded
     on public.sports_value_history(recorded_at, id);
 
 alter table public.sports_value_history enable row level security;
+
+-- Values from recent eBay sales for sports cards CardSight can't value
+-- (also in supabase/migrations/2026-11-29_sports_sales_prices.sql).
+alter table public.sports_cards
+    add column if not exists sales_prices jsonb,
+    add column if not exists sales_priced_at timestamptz;

@@ -120,6 +120,13 @@ function CardThumb({ card, onClick }) {
 
 // Raw / PSA 8 / PSA 9 / PSA 10 values with their sale counts, plus any
 // other graders CardSight has sales for.
+// "3 sales" (CardSight, past year) or "3 sales · 30 days" (The Card API).
+function salesText(grade) {
+  if (!grade) return "no sales";
+  const count = `${grade.sales} sale${grade.sales === 1 ? "" : "s"}`;
+  return grade.source === "cardapi" ? `${count} · 30 days` : count;
+}
+
 function GradeTable({ grades, owned }) {
   const others = Object.keys(grades || {}).filter(
     (key) => !SHOWN_GRADES.includes(key) && key !== "PSA_7"
@@ -134,9 +141,7 @@ function GradeTable({ grades, owned }) {
             <div key={key} className={`sports-grade ${owned === key ? "owned" : ""}`}>
               <span>{gradeLabel(key)}</span>
               <strong>{money(grade?.value)}</strong>
-              <small>
-                {grade ? `${grade.sales} sale${grade.sales === 1 ? "" : "s"}` : "no sales"}
-              </small>
+              <small>{salesText(grade)}</small>
             </div>
           );
         })}
@@ -434,8 +439,15 @@ export default function SportsCards({ onChange }) {
     try {
       const result = await refreshSportsPrices();
       setMessage(
-        `Prices refreshed: ${result.priced} of ${result.cards} cards had sales (${result.calls} CardSight call${result.calls === 1 ? "" : "s"}).`
+        [
+          `Prices refreshed: ${result.priced} cards priced by CardSight (${result.calls} call${result.calls === 1 ? "" : "s"})`,
+          result.sales_checked ? `${result.sales_checked} checked against recent eBay sales` : null,
+        ]
+          .filter(Boolean)
+          .join(", ") + "."
       );
+      const problems = [result.cardsight_error, result.sales_note].filter(Boolean);
+      if (problems.length) setError(problems.join(" "));
       await load({ quiet: true, changed: true });
     } catch (err) {
       setError(err.message);
@@ -495,14 +507,10 @@ export default function SportsCards({ onChange }) {
       setModalError("Enter the player or card name.");
       return;
     }
-    if (manualForm.manual_value === "") {
-      setModalError("Enter what the card is worth (CardSight has no sales for it).");
-      return;
-    }
     setAdding(true);
     setModalError("");
     try {
-      await addSportsManualCard({
+      const response = await addSportsManualCard({
         name: manualForm.name.trim(),
         year: manualForm.year.trim() || null,
         release_name: manualForm.release_name.trim() || null,
@@ -511,11 +519,18 @@ export default function SportsCards({ onChange }) {
         league: manualForm.league || null,
         ownership_grade: manualForm.ownership_grade,
         quantity: Number(manualForm.quantity) || 1,
-        manual_value: Number(manualForm.manual_value),
+        manual_value: manualForm.manual_value === "" ? null : Number(manualForm.manual_value),
         manual_source_url: manualForm.manual_source_url.trim() || null,
         notes: manualForm.notes.trim() || null,
       });
-      setMessage(`Added ${manualForm.name.trim()} to Sports.`);
+      const name = manualForm.name.trim();
+      setMessage(
+        manualForm.manual_value !== ""
+          ? `Added ${name} to Sports at your value.`
+          : response.sales_found
+            ? `Added ${name}, valued from recent eBay sales.`
+            : `Added ${name}. No recent sales were found, so give it a value with Edit.`
+      );
       closeAdd();
       await load({ quiet: true, changed: true });
     } catch (err) {
@@ -647,8 +662,8 @@ export default function SportsCards({ onChange }) {
 
   async function handleEdit(event, clearValue = false) {
     event.preventDefault();
-    if (editForm.card && (editForm.manual_value === "" || !editForm.card.name.trim())) {
-      setModalError("A card you added by hand needs a name and your own value.");
+    if (editForm.card && !editForm.card.name.trim()) {
+      setModalError("Enter the player or card name.");
       return;
     }
     setSavingEdit(true);
@@ -706,9 +721,11 @@ export default function SportsCards({ onChange }) {
         type="button"
         className="manual-source-link source-count-link"
         onClick={() => setDetailsItem(item)}
-        title={`Median of the last ${grade.used} sales; last sold ${shortDate(grade.last_sale)}`}
+        title={`Median of the last ${grade.used} ${
+          grade.source === "cardapi" ? "sales in the past 30 days" : "sales in the past year"
+        }; last sold ${shortDate(grade.last_sale)}`}
       >
-        {grade.sales} sale{grade.sales === 1 ? "" : "s"}
+        {salesText(grade)}
       </button>
     );
   }
@@ -1017,7 +1034,7 @@ export default function SportsCards({ onChange }) {
                 </h2>
                 <span>
                   {manualForm
-                    ? "For cards CardSight doesn't have. Its value is the one you enter, and it isn't refreshed."
+                    ? "For cards CardSight doesn't have. Valued from recent eBay sales when any are found (checked daily), or by your own value."
                     : selected
                       ? `${cardLine(selected)}${selected.league ? ` · ${leagueName(selected.league)}` : ""}`
                       : "Search by player, then narrow by year, card number or set. Each search uses 1 CardSight call."}
@@ -1154,7 +1171,7 @@ export default function SportsCards({ onChange }) {
                     />
                   </label>
                   <label>
-                    Your value per card
+                    Your value (optional)
                     <input
                       type="number"
                       min="0"
@@ -1163,7 +1180,8 @@ export default function SportsCards({ onChange }) {
                       onChange={(event) =>
                         setManualForm((current) => ({ ...current, manual_value: event.target.value }))
                       }
-                      placeholder="0.00"
+                      placeholder="Recent sales"
+                      title="Leave empty to value it from recent eBay sales, when any are found"
                     />
                   </label>
                 </div>
@@ -1289,7 +1307,7 @@ export default function SportsCards({ onChange }) {
                             : `None of these is #${number}. CardSight may not have this card.`}
                         </strong>
                         <span>
-                          Its catalog is missing some sets. Add the card by hand with your own value. That uses no calls.
+                          Its catalog is missing some sets. Add the card by hand: it's valued from recent eBay sales when any are found, or by your own value. No CardSight calls.
                         </span>
                       </div>
                       <button
@@ -1580,7 +1598,7 @@ export default function SportsCards({ onChange }) {
             </label>
 
             <label>
-              {editForm.card ? "Your value per card" : "Your value per card (leave empty to use recent sales)"}
+              Your value per card (leave empty to use recent sales)
               <input
                 type="number"
                 min="0"
@@ -1614,7 +1632,7 @@ export default function SportsCards({ onChange }) {
             </label>
 
             <div className="modal-actions">
-              {!editForm.card && editForm.item.manual_value !== null && editForm.item.manual_value !== undefined && (
+              {editForm.item.manual_value !== null && editForm.item.manual_value !== undefined && (
                 <button
                   type="button"
                   className="secondary-button"
@@ -1667,10 +1685,9 @@ export default function SportsCards({ onChange }) {
                 />
               )}
               <div className="sports-check-body">
-                {detailsItem.card.manual ? (
+                {detailsItem.value_source === "manual" && (
                   <p className="modal-tip">
-                    Added by hand: CardSight doesn't have this card. It's valued at{" "}
-                    <strong>{money(detailsItem.value_each)}</strong> each, the value you set
+                    Valued at <strong>{money(detailsItem.value_each)}</strong> each, the value you set
                     {detailsItem.manual_source_url ? (
                       <>
                         {" "}from{" "}
@@ -1681,8 +1698,17 @@ export default function SportsCards({ onChange }) {
                     ) : null}
                     . Change it with Edit.
                   </p>
-                ) : (
+                )}
+
+                {Object.keys(detailsItem.prices || {}).length > 0 ? (
                   <GradeTable grades={detailsItem.prices} owned={detailsItem.ownership_grade} />
+                ) : (
+                  detailsItem.card.manual && (
+                    <p className="modal-tip">
+                      No recent sales of this card were found (CardSight doesn't have it, and The
+                      Card API looks back 30 days).
+                    </p>
+                  )
                 )}
 
                 {detailsItem.grading && (
@@ -1710,9 +1736,11 @@ export default function SportsCards({ onChange }) {
 
                 {detailsItem.notes && <p className="modal-tip">{detailsItem.notes}</p>}
 
-                {!detailsItem.card.manual && (
+                {detailsItem.priced_at && (
                   <small className="sports-check-note">
-                    Prices from CardSight AI, refreshed {refreshedText(detailsItem.priced_at)}.
+                    Values are medians of recent sales: CardSight (eBay auctions, past year) or
+                    The Card API (past 30 days), whichever has more sales for that grade.
+                    Refreshed {refreshedText(detailsItem.priced_at)}.
                   </small>
                 )}
               </div>

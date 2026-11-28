@@ -499,6 +499,15 @@ def update_sports_card_details(card_id: str, details: dict[str, Any]) -> None:
     )
 
 
+def save_sports_sales_prices(results: dict[str, dict[str, Any]]) -> None:
+    """The Card API values by sports_cards id. Raises if
+    supabase/migrations/2026-11-29_sports_sales_prices.sql hasn't been run."""
+    for card_id, summary in results.items():
+        _client().table("sports_cards").update(
+            {"sales_prices": summary, "sales_priced_at": summary.get("priced_at") or utc_now_iso()}
+        ).eq("id", card_id).execute()
+
+
 def save_sports_card_prices(updates: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
     """Replaces the cached prices of many cards: (saved row, summary)."""
     payload = [_sports_card_payload(card, prices) for card, prices in updates]

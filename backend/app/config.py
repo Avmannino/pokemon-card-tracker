@@ -29,6 +29,9 @@ class Settings:
         # Optional: the Sports section (CardSight AI catalog and prices) only
         # works when this is set.
         self.cardsight_api_key = os.getenv("CARDSIGHT_API_KEY", "").strip()
+        # Optional: recent eBay sales (The Card API) for sports cards
+        # CardSight has too little data on.
+        self.cardapi_key = os.getenv("CARDAPI_KEY", "").strip()
         # Default grading cost per card for Grading Opportunities (the page
         # can use its own).
         try:

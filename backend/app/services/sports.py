@@ -1,9 +1,13 @@
-"""The Sports section: your sports cards valued from CardSight's cached
-prices, each raw card's grading outlook, and the daily price refresh.
+"""The Sports section: your sports cards valued from recent sales, each raw
+card's grading outlook, and the daily price refresh.
 
-Separate from the Pokemon collection and its performance chart: CardSight's
-terms don't allow keeping price history, so sports cards have current
-values only.
+Two sources: CardSight (its catalog's cards, eBay auctions from the past
+year, one call per 100 cards) and, for cards CardSight can't value - added
+by hand, or fewer than 3 CardSight sales - The Card API (sales found by
+title from the past 30 days). Each grade is valued from whichever has more
+sales behind it. Neither source's terms allow keeping price history, so
+the cards have current values only; the chart gets the collection's total
+(see record_value).
 """
 
 import logging
@@ -12,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .. import db
-from . import cardsight, grading, state_store
+from . import cardapi, cardsight, grading, state_store
 
 
 logger = logging.getLogger("sports")
@@ -34,20 +38,53 @@ class RefreshCooldown(Exception):
         self.retry_after = retry_after
 
 
-def _grades(card: dict[str, Any]) -> dict[str, Any]:
+# Fewer CardSight sales than this for a grade you own and the card is
+# also looked up on The Card API.
+THIN_SALES = 3
+
+
+def _cardsight_grades(card: dict[str, Any]) -> dict[str, Any]:
     return ((card.get("prices") or {}).get("grades")) or {}
+
+
+def _sales_grades(card: dict[str, Any]) -> dict[str, Any]:
+    return ((card.get("sales_prices") or {}).get("grades")) or {}
+
+
+def _grades(card: dict[str, Any]) -> dict[str, Any]:
+    """Each grade's value from whichever source has more sales behind it -
+    CardSight (past year) or The Card API (past 30 days) - marked with
+    "source". CardSight wins ties."""
+    cardsight_grades = _cardsight_grades(card)
+    sales_grades = _sales_grades(card)
+    merged = {}
+    for key in set(cardsight_grades) | set(sales_grades):
+        first = cardsight_grades.get(key)
+        second = sales_grades.get(key)
+        if first and (not second or (first.get("sales") or 0) >= (second.get("sales") or 0)):
+            merged[key] = {**first, "source": "cardsight"}
+        elif second:
+            merged[key] = {**second, "source": "cardapi"}
+    return merged
 
 
 def owned_value(item: dict[str, Any], card: dict[str, Any]) -> tuple[float | None, str | None]:
     """Value of one copy and where it comes from: your own value when you
-    set one, otherwise the median of recent sales of the grade you own."""
+    set one, otherwise the median of recent sales of the grade you own
+    ("cardsight" or "cardapi")."""
     if item.get("manual_value") is not None:
         return float(item["manual_value"]), "manual"
 
     grade = _grades(card).get(item["ownership_grade"])
     if grade and grade.get("value") is not None:
-        return float(grade["value"]), "cardsight"
+        return float(grade["value"]), grade["source"]
     return None, None
+
+
+SOURCE_PERIODS = {
+    "cardsight": "eBay auction sales in the past year",
+    "cardapi": "sales in the past 30 days",
+}
 
 
 def _grade_part(grade: dict[str, Any] | None) -> dict[str, Any]:
@@ -55,14 +92,41 @@ def _grade_part(grade: dict[str, Any] | None) -> dict[str, Any]:
         return {"value": None, "method": None, "summary": None, "as_of": None, "sales": None}
     return {
         "value": grade.get("value"),
-        "method": "cardsight",
+        "method": grade.get("source", "cardsight"),
         "summary": (
             f"Median of the last {grade.get('used')} of {grade.get('sales')} "
-            "eBay auction sales in the past year."
+            f"{SOURCE_PERIODS.get(grade.get('source'), SOURCE_PERIODS['cardsight'])}."
         ),
         "as_of": grade.get("last_sale"),
         "sales": grade.get("sales"),
     }
+
+
+def needs_sales_lookup(card: dict[str, Any], grades_owned: set[str]) -> bool:
+    """Look the card up on The Card API: it was added by hand, or CardSight
+    has fewer than THIN_SALES sales for a grade you own."""
+    if is_manual_card(card):
+        return True
+    cardsight_grades = _cardsight_grades(card)
+    return any(
+        (cardsight_grades.get(grade) or {}).get("sales", 0) < THIN_SALES
+        for grade in grades_owned
+    )
+
+
+async def update_sales_prices(cards: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], str | None]:
+    """Looks the cards up on The Card API and saves what it found. Returns
+    the values by card id and why it stopped early, if it did. Never
+    raises: these values only fill gaps."""
+    if not cards or not cardapi.configured():
+        return {}, None
+    try:
+        results, stopped = await cardapi.price_cards(cards)
+        db.save_sports_sales_prices(results)
+        return results, stopped
+    except Exception as exc:
+        logger.warning("Card API lookup failed", exc_info=True)
+        return {}, str(exc)
 
 
 # Cards CardSight doesn't have (e.g. 2003 Upper Deck Yankees 100th
@@ -136,9 +200,9 @@ def grading_outlook(
 
     if not result["available"]:
         if raw["value"] is None:
-            result["unavailable_reason"] = "No raw sales in the past year."
+            result["unavailable_reason"] = "No recent raw sales."
         elif result["psa10_value"] is None:
-            result["unavailable_reason"] = "No PSA 10 sales in the past year."
+            result["unavailable_reason"] = "No recent PSA 10 sales."
     return result
 
 
@@ -155,8 +219,7 @@ def build_collection(
 
         quantity = int(item.get("quantity") or 1)
         value_each, source = owned_value(item, card)
-        # A hand-added card has no sales to judge grading by.
-        is_raw = item["ownership_grade"] == "RAW" and not is_manual_card(card)
+        is_raw = item["ownership_grade"] == "RAW"
 
         rows.append(
             {
@@ -164,7 +227,7 @@ def build_collection(
                 "quantity": quantity,
                 "card": card_view(card),
                 "prices": _grades(card),
-                "priced_at": card.get("priced_at"),
+                "priced_at": card.get("priced_at") or card.get("sales_priced_at"),
                 "last_sale_date": (card.get("prices") or {}).get("last_sale_date"),
                 "value_each": value_each,
                 "value_source": source,
@@ -263,24 +326,22 @@ def history_rows(
 
 def refresh_changes(
     items: list[dict[str, Any]],
-    cards: dict[str, dict[str, Any]],
-    summaries: dict[str, dict[str, Any]],
+    before_cards: dict[str, dict[str, Any]],
+    after_cards: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """What a refresh changed: each card you own whose grade's value moved,
-    biggest dollar move (value x copies) first. Cards valued by your own
-    value, or priced for the first time, aren't changes."""
+    """What a refresh changed: each card you own whose value (from either
+    source) moved, biggest dollar move (value x copies) first. Cards valued
+    by your own value, or priced for the first time, aren't changes."""
     changes = []
     for item in items:
-        card = cards.get(item["sports_card_id"])
-        if not card or item.get("manual_value") is not None:
-            continue
-        summary = summaries.get(card["cardsight_id"])
-        if summary is None:
+        before_card = before_cards.get(item["sports_card_id"])
+        after_card = after_cards.get(item["sports_card_id"])
+        if not before_card or not after_card or item.get("manual_value") is not None:
             continue
 
         grade = item["ownership_grade"]
-        before = (_grades(card).get(grade) or {}).get("value")
-        after = ((summary.get("grades") or {}).get(grade) or {}).get("value")
+        before, _ = owned_value(item, before_card)
+        after, _ = owned_value(item, after_card)
         if before is None or after is None or round(float(after) - float(before), 2) == 0:
             continue
 
@@ -289,7 +350,7 @@ def refresh_changes(
         changes.append(
             {
                 "item_id": item["id"],
-                "card": {**card_view(card), "photo_url": summary.get("photo_url") or card_view(card)["photo_url"]},
+                "card": card_view(after_card),
                 "grade": grade,
                 "quantity": quantity,
                 "previous_each": float(before),
@@ -308,7 +369,8 @@ _refreshing = False
 
 async def refresh_prices(reason: str = "manual", now: datetime | None = None) -> dict[str, Any]:
     """Reprices every sports card you own: one CardSight call per 100
-    cards. Each card's cached prices are replaced, never added to."""
+    cards, then The Card API for the cards CardSight can't value (one search
+    each). Each card's values are replaced, never added to."""
     global _refreshing
     if _refreshing:
         raise RefreshBusy("Sports prices are already refreshing.")
@@ -323,35 +385,66 @@ async def refresh_prices(reason: str = "manual", now: datetime | None = None) ->
     _refreshing = True
     try:
         items = db.get_sports_items()
-        cards_by_id = db.get_sports_cards({item["sports_card_id"] for item in items})
-        cards = [card for card in cards_by_id.values() if not is_manual_card(card)]
-        summaries = await cardsight.get_prices([card["cardsight_id"] for card in cards])
-        # Compared before the old prices are overwritten. Only this refresh's
-        # changes are kept (replaced by the next one), never a history.
-        changes = refresh_changes(items, cards_by_id, summaries)
+        # Copies, so saving the new values can't change what they're
+        # compared against.
+        before = {
+            card_id: dict(card)
+            for card_id, card in db.get_sports_cards({item["sports_card_id"] for item in items}).items()
+        }
+        after = {card_id: dict(card) for card_id, card in before.items()}
+        catalog_cards = [card for card in before.values() if not is_manual_card(card)]
+
+        summaries: dict[str, dict[str, Any]] = {}
+        cardsight_error = None
+        if catalog_cards:
+            try:
+                summaries = await cardsight.get_prices([card["cardsight_id"] for card in catalog_cards])
+            except cardsight.CardSightError as exc:
+                # The Card API still fills what it can.
+                cardsight_error = str(exc)
+        for card in catalog_cards:
+            if card["cardsight_id"] in summaries:
+                after[card["id"]]["prices"] = summaries[card["cardsight_id"]]
         db.save_sports_card_prices(
-            [(card, summaries[card["cardsight_id"]]) for card in cards if card["cardsight_id"] in summaries]
+            [(card, summaries[card["cardsight_id"]]) for card in catalog_cards if card["cardsight_id"] in summaries]
         )
 
-        # The chart's sports total: price moves are market movement; cards
-        # priced for the first time (or no longer priced) are flows.
-        repriced = {
-            card_id: {**card, "prices": summaries[card["cardsight_id"]]}
-            for card_id, card in cards_by_id.items()
-            if card["cardsight_id"] in summaries
-        }
+        # The Card API for cards CardSight can't value, least recently
+        # looked up first (the day's allowance may run out).
+        grades_owned: dict[str, set[str]] = {}
+        for item in items:
+            grades_owned.setdefault(item["sports_card_id"], set()).add(item["ownership_grade"])
+        lookups = sorted(
+            (
+                card for card_id, card in after.items()
+                if needs_sales_lookup(card, grades_owned.get(card_id, set()))
+            ),
+            key=lambda card: card.get("sales_priced_at") or "",
+        )
+        sales, sales_stopped = await update_sales_prices(lookups)
+        for card_id, summary in sales.items():
+            after[card_id]["sales_prices"] = summary
+
+        # Only this refresh's changes are kept (replaced by the next one),
+        # never a history. For the chart's sports total, value moves are
+        # market movement; cards valued for the first time (or no longer
+        # valued) are flows.
+        changes = refresh_changes(items, before, after)
         record_value(
             "refresh",
-            total=collection_total(items, {**cards_by_id, **repriced}),
+            total=collection_total(items, after),
             market_change=sum(change["change"] for change in changes),
         )
 
         record = {
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "reason": reason,
-            "cards": len(cards),
+            "cards": len(before),
             "priced": len(summaries),
-            "calls": math.ceil(len(cards) / cardsight.PRICING_BATCH),
+            "calls": math.ceil(len(catalog_cards) / cardsight.PRICING_BATCH),
+            "cardsight_error": cardsight_error,
+            "sales_checked": len(sales),
+            "sales_note": sales_stopped,
             "net_change": round(sum(change["change"] for change in changes), 2),
             "changes": changes,
         }

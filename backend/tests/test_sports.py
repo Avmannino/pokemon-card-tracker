@@ -13,7 +13,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from app import db, main, sports_api
-from app.services import cardsight, sports, state_store
+from app.services import cardapi, cardsight, sports, state_store
 from tests.test_pricing import FakeState
 
 
@@ -204,7 +204,7 @@ class ValuationTests(unittest.TestCase):
     def test_missing_graded_sales_explained(self):
         outlook = sports.grading_outlook(priced_card(psa10=None), 30)
         self.assertFalse(outlook["available"])
-        self.assertEqual(outlook["unavailable_reason"], "No PSA 10 sales in the past year.")
+        self.assertEqual(outlook["unavailable_reason"], "No recent PSA 10 sales.")
 
         outlook = sports.grading_outlook(priced_card(raw=None), 30, raw_override=5.0)
         self.assertTrue(outlook["available"])
@@ -269,6 +269,11 @@ class FakeSportsDB:
     def update_sports_card_details(self, card_id, details):
         self.cards[card_id].update(details)
 
+    def save_sports_sales_prices(self, results):
+        for card_id, summary in results.items():
+            self.cards[card_id]["sales_prices"] = summary
+            self.cards[card_id]["sales_priced_at"] = summary.get("priced_at")
+
     def get_last_sports_value(self):
         return self.history[-1] if self.history else None
 
@@ -304,11 +309,24 @@ class SportsApiTests(unittest.TestCase):
                 if cardsight_id == BO
             }
 
+        # The Card API: what each card's title search finds (by card name).
+        self.sales_found = {}
+        self.sales_lookups = []
+
+        async def fake_price_cards(cards):
+            self.sales_lookups.append([card["name"] for card in cards])
+            return {
+                card["id"]: cardapi.summarize(self.sales_found.get(card["name"], []), card)
+                for card in cards
+            }, None
+
         patches = [
             mock.patch.object(state_store, "get", self.state.get),
             mock.patch.object(state_store, "set", self.state.set),
             mock.patch.object(cardsight, "get_prices", fake_get_prices),
             mock.patch.object(cardsight.settings, "cardsight_api_key", "test-key"),
+            mock.patch.object(cardapi.settings, "cardapi_key", "test-key"),
+            mock.patch.object(cardapi, "price_cards", fake_price_cards),
         ]
         for name in (
             "save_sports_card", "save_sports_card_prices", "get_sports_cards",
@@ -316,6 +334,7 @@ class SportsApiTests(unittest.TestCase):
             "get_sports_items", "get_sports_item", "add_sports_item", "update_sports_item",
             "delete_sports_item", "sports_card_in_use", "get_last_sports_value",
             "insert_sports_value", "get_sports_value_history", "update_sports_card_details",
+            "save_sports_sales_prices",
         ):
             patches.append(mock.patch.object(db, name, getattr(self.fake, name)))
         for patcher in patches:
@@ -472,28 +491,118 @@ class SportsApiTests(unittest.TestCase):
         self.assertTrue(row["card"]["manual"])
         self.assertEqual((row["card"]["number"], row["card"]["league"]), ("12", "MLB"))
         self.assertEqual((row["value_total"], row["value_source"]), (9.0, "manual"))
-        self.assertIsNone(row["grading"])
+        self.assertFalse(row["grading"]["available"])
         self.assertEqual(self.fake.history[-1]["flow"], 9.0)
 
         self.pricing_calls.clear()
         self.client.post("/api/sports/refresh")
         self.assertEqual(self.pricing_calls, [[BO]])
 
-        # Its details can be fixed; its value can be changed but not removed.
+        # Its details can be fixed (and are looked up again).
         response = self.client.patch(
             f"/api/sports/items/{item['id']}",
             json={"card": {"name": "Derek Jeter", "year": "2003", "release_name": "Upper Deck Yankees 100th Anniversary", "number": "13"}},
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.fake.cards[item["sports_card_id"]]["number"], "13")
-        self.assertEqual(
-            self.client.patch(f"/api/sports/items/{item['id']}", json={"manual_value": None}).status_code, 400
-        )
+        self.assertIn(["Derek Jeter"], self.sales_lookups)
 
         bo = next(row for row in self.fake.items.values() if row["id"] != item["id"])
         self.assertEqual(
             self.client.patch(f"/api/sports/items/{bo['id']}", json={"card": {"name": "Bo"}}).status_code, 400
         )
+
+
+    def test_hand_added_card_without_a_value_is_valued_from_recent_sales(self):
+        self.sales_found["Frank Thomas"] = [
+            card_api_sale(9.99, 14, "1990-91 Topps Major League Debut 1990 - Frank Thomas #153 Rookie RC"),
+            card_api_sale(12.0, 20, "Frank Thomas 1991 Topps Major League Debut #153"),
+            card_api_sale(8.0, 21, "Frank Thomas 1990 Topps Debut #153", confirmed=False),
+        ]
+        response = self.client.post(
+            "/api/sports/manual-items",
+            json={"name": "Frank Thomas", "year": "1991", "release_name": "'90 Major League Debut", "number": "153"},
+        )
+        self.assertTrue(response.json()["sales_found"])
+
+        row = self.client.get("/api/sports/collection").json()["items"][0]
+        self.assertEqual((row["value_each"], row["value_source"]), (11.0, "cardapi"))
+        self.assertEqual(row["prices"]["RAW"]["sales"], 2)
+
+    def test_thin_cardsight_cards_use_whichever_source_has_more_sales(self):
+        # CardSight has 1 raw sale for Bo ($1.29); the title search finds 3.
+        self.sales_found["Bo Jackson"] = [
+            card_api_sale(price, day, "1991 Stadium Club Bo Jackson #224 Royals")
+            for price, day in ((2.0, 10), (2.5, 12), (3.0, 14))
+        ]
+        self.client.post("/api/sports/items", json={"card": BO_REF})
+        self.assertEqual(self.sales_lookups, [["Bo Jackson"]])
+
+        row = self.client.get("/api/sports/collection").json()["items"][0]
+        self.assertEqual((row["value_each"], row["value_source"]), (2.5, "cardapi"))
+        # PSA 10 still from CardSight, the only source with sales for it.
+        self.assertEqual(row["prices"]["PSA_10"]["source"], "cardsight")
+
+        # A refresh finding a lower price is a market move.
+        self.sales_found["Bo Jackson"] = [
+            card_api_sale(price, day, "1991 Stadium Club Bo Jackson #224 Royals")
+            for price, day in ((1.75, 20), (2.0, 21), (2.25, 22))
+        ]
+        record = self.client.post("/api/sports/refresh").json()
+        self.assertEqual(record["sales_checked"], 1)
+        self.assertEqual(record["changes"][0]["change"], -0.5)
+        self.assertEqual(self.fake.history[-1]["flow"], 0.0)
+
+
+def card_api_sale(price, day, title, confirmed=True, grader=None, grade=None, number=None, year=None):
+    return {
+        "title": title, "price": price, "price_confirmed": confirmed,
+        "sale_date": f"2026-11-{day:02d}", "sold_at": f"2026-11-{day:02d}T12:00:00Z",
+        "listing_type": "auction", "grader": grader, "grade": grade,
+        "card_number": number, "year": year,
+    }
+
+
+class CardApiTests(unittest.TestCase):
+    THOMAS = {"id": "c1", "name": "Frank Thomas", "number": "153", "year": "1991",
+              "release_name": "'90 Major League Debut", "set_name": None}
+
+    def test_queries(self):
+        self.assertEqual(cardapi.query_for(self.THOMAS), "thomas major league debut 153")
+        griffey = {"name": "Ken Griffey, Jr. MC", "number": "603", "release_name": "Stadium Club", "set_name": "Base Set"}
+        self.assertEqual(cardapi.query_for(griffey), "griffey stadium club 603")
+        nolan = {"name": "Nolan Ryan", "number": "605", "release_name": "Topps Stadium Club", "set_name": "Members Choice"}
+        self.assertEqual(cardapi.query_for(nolan), "ryan members choice 605")
+
+    def test_only_this_cards_confirmed_single_sales_count_and_grades_are_split(self):
+        records = [
+            card_api_sale(10.0, 20, "1990-91 Topps Major League Debut Frank Thomas #153 RC"),
+            card_api_sale(12.0, 21, "Frank Thomas Major League Debut #153", number="153", year="1990"),
+            card_api_sale(99.0, 22, "Frank Thomas Major League Debut #153", confirmed=False),
+            card_api_sale(5.0, 22, "Frank Thomas Major League Debut #15"),
+            card_api_sale(5.0, 22, "Major League Debut lot of 10 Frank Thomas #153"),
+            card_api_sale(5.0, 22, "Frank Thomas Major League Debut #153 reprint"),
+            card_api_sale(5.0, 22, "Frank Thomas Major League Debut", number="154"),
+            card_api_sale(5.0, 22, "Frank Thomas 1984 Debut #153", number="153", year="1984"),
+            card_api_sale(80.0, 23, "Frank Thomas Major League Debut #153", grader="PSA", grade="9"),
+            card_api_sale(150.0, 24, "Frank Thomas Major League Debut #153 PSA 10 GEM MINT"),
+            card_api_sale(60.0, 24, "Frank Thomas Major League Debut #153 BGS 9.5"),
+        ]
+        grades = cardapi.summarize(records, self.THOMAS)["grades"]
+        self.assertEqual(grades["RAW"], {**grades["RAW"], "value": 11.0, "sales": 2})
+        self.assertEqual(grades["PSA_9"]["value"], 80.0)
+        self.assertEqual(grades["PSA_10"]["value"], 150.0)
+        self.assertEqual(grades["BGS_9.5"]["value"], 60.0)
+        self.assertNotIn("recent", grades["RAW"])
+
+    def test_merged_grades_prefer_more_sales_and_cardsight_on_ties(self):
+        card = {
+            "prices": {"grades": {"RAW": {"value": 0.45, "sales": 1}, "PSA_9": {"value": 10.5, "sales": 3}}},
+            "sales_prices": {"grades": {"RAW": {"value": 6.5, "sales": 19}, "PSA_9": {"value": 139.25, "sales": 3}}},
+        }
+        merged = sports._grades(card)
+        self.assertEqual((merged["RAW"]["value"], merged["RAW"]["source"]), (6.5, "cardapi"))
+        self.assertEqual((merged["PSA_9"]["value"], merged["PSA_9"]["source"]), (10.5, "cardsight"))
 
 
 class SportsInPortfolioTests(unittest.TestCase):

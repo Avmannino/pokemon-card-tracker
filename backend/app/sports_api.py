@@ -202,6 +202,10 @@ async def add_sports_item(request: SportsAddRequest) -> dict[str, Any]:
         )
         merged = False
 
+    # Too few CardSight sales for the grade you own: recent sales by title.
+    if sports.needs_sales_lookup(card, {request.ownership_grade}):
+        await sports.update_sales_prices([card])
+
     sports.record_value("add")
     return {"item": item, "merged": merged, "price_error": price_error}
 
@@ -211,9 +215,10 @@ def _clean(text: str | None) -> str | None:
 
 
 @router.post("/manual-items")
-def add_manual_sports_item(request: SportsManualAddRequest) -> dict[str, Any]:
-    """Adds a card CardSight doesn't have, with your own value. Never sent to
-    CardSight; its value changes only when you edit it."""
+async def add_manual_sports_item(request: SportsManualAddRequest) -> dict[str, Any]:
+    """Adds a card CardSight doesn't have. Never sent to CardSight; valued
+    from recent sales found by title (The Card API) when there are any,
+    or by your own value, which always wins when set."""
     card = db.save_sports_card(
         {
             "cardsight_id": f"{sports.MANUAL_PREFIX}{uuid.uuid4().hex}",
@@ -233,19 +238,20 @@ def add_manual_sports_item(request: SportsManualAddRequest) -> dict[str, Any]:
         manual_value=request.manual_value,
         manual_source_url=_clean(request.manual_source_url),
     )
+    sales, note = await sports.update_sales_prices([card])
     sports.record_value("add")
-    return {"item": item}
+    found = bool((sales.get(card["id"]) or {}).get("grades"))
+    return {"item": item, "sales_found": found, "sales_note": note}
 
 
 @router.patch("/items/{item_id}")
-def update_sports_item(item_id: str, request: SportsItemUpdate) -> dict[str, Any]:
+async def update_sports_item(item_id: str, request: SportsItemUpdate) -> dict[str, Any]:
     item = db.get_sports_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Card not found in your sports collection.")
 
-    manual_card = sports.is_manual_card(
-        db.get_sports_cards([item["sports_card_id"]]).get(item["sports_card_id"]) or {}
-    )
+    card = db.get_sports_cards([item["sports_card_id"]]).get(item["sports_card_id"]) or {}
+    manual_card = sports.is_manual_card(card)
 
     fields = {}
     for field in request.model_fields_set - {"card"}:
@@ -257,11 +263,6 @@ def update_sports_item(item_id: str, request: SportsItemUpdate) -> dict[str, Any
         fields[field] = value
 
     if "manual_value" in fields and fields["manual_value"] is None:
-        if manual_card:
-            raise HTTPException(
-                status_code=400,
-                detail="A card you added by hand needs your own value (CardSight has no sales for it).",
-            )
         fields["manual_source_url"] = None
 
     card_details = None
@@ -285,6 +286,8 @@ def update_sports_item(item_id: str, request: SportsItemUpdate) -> dict[str, Any
 
     if card_details is not None:
         db.update_sports_card_details(item["sports_card_id"], card_details)
+        # Corrected details mean a different title search.
+        await sports.update_sales_prices([{**card, **card_details}])
     if fields:
         item = db.update_sports_item(item_id, fields)
     sports.record_value("quantity" if set(fields) == {"quantity"} else "edit")

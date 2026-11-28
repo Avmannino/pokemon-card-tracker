@@ -93,7 +93,9 @@ class SportsManualAddRequest(BaseModel):
     league: Literal["MLB", "NFL", "NBA", "NHL"] | None = None
     quantity: int = Field(default=1, ge=1, le=999)
     ownership_grade: SportsGrade = "RAW"
-    manual_value: float = Field(ge=0)
+    # Optional: without it the card is valued from recent sales when any
+    # are found.
+    manual_value: float | None = Field(default=None, ge=0)
     manual_source_url: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=2000)
 

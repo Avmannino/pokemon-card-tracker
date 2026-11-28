@@ -482,10 +482,20 @@ true count. For a card with no sales, use **Edit → Your value**.
 
 Some sets aren't in CardSight's catalog (for example 2003 Upper Deck
 Yankees 100th Anniversary is listed with no cards). Use **Can't find your
-card? Add it by hand** in the Add Card window. A card added by hand has
-your own value (and optionally a link to where it's from, e.g.
-SportsCardsPro). It counts in every total. It's never sent to CardSight, so
-its value only changes when you edit it.
+card? Add it by hand** in the Add Card window. A card added by hand is
+never sent to CardSight.
+
+**Recent sales fallback ([The Card API](https://www.thecardapi.com), free:
+5,000 sale records a day, sales from the last 30 days).** Cards added by
+hand, and CardSight cards with fewer than 3 sales for a grade you own, are
+looked up by title (player, set and number). The lookup runs when the card
+is added and on each daily refresh. Each grade's value comes from whichever
+source has more sales behind it, and the table marks Card API counts with
+"30 days". Your own value (**Edit → Your value**) always wins when set. The
+Card API's free terms don't allow storing its sale records, so only the
+app's own figures are kept (median, number of sales, last sale date). Setup:
+run `supabase/migrations/2026-11-29_sports_sales_prices.sql` and add
+`CARDAPI_KEY` to `backend/.env` and Render.
 
 # 11. Current project structure
 
