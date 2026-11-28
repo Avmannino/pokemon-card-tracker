@@ -151,6 +151,60 @@ export function startSmallHitsSync() {
   });
 }
 
+// --- Sports section (CardSight AI) ---
+
+// Your sports cards from saved data; never calls CardSight.
+export function getSportsCollection() {
+  return request("/api/sports/collection");
+}
+
+// One CardSight call (repeats within the hour are free).
+export function searchSportsCards({ name, year, number, set }) {
+  const params = new URLSearchParams({ name: name.trim() });
+  if (year?.trim()) params.set("year", year.trim());
+  if (number?.trim()) params.set("number", number.trim());
+  if (set?.trim()) params.set("set", set.trim());
+  return request(`/api/sports/search?${params.toString()}`);
+}
+
+// Values and grading outlook for up to 100 cards: at most one CardSight
+// call, none for cards checked recently.
+export function getSportsPrices(cardsightIds) {
+  return request("/api/sports/prices", {
+    method: "POST",
+    body: JSON.stringify({ cardsight_ids: cardsightIds }),
+  });
+}
+
+export function addSportsCard(payload) {
+  return request("/api/sports/items", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// Only the fields given change; manual_value null clears your own value.
+export function updateSportsCard(itemId, fields) {
+  return request(`/api/sports/items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+  });
+}
+
+export function deleteSportsCard(itemId) {
+  return request(`/api/sports/items/${itemId}`, { method: "DELETE" });
+}
+
+// Reprices every sports card (one CardSight call per 100 cards).
+export function refreshSportsPrices() {
+  return request("/api/sports/refresh", { method: "POST" });
+}
+
+// CardSight's catalog image, for a card with no sale photo.
+export function sportsImageUrl(cardsightId) {
+  return `${API_BASE_URL}/api/sports/image/${cardsightId}`;
+}
+
 export function saveGradedValues(cardId, payload) {
   return request(`/api/cards/${cardId}/graded-values`, {
     method: "POST",

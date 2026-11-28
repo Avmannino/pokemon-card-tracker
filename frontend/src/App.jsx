@@ -17,6 +17,7 @@ import {
 import CardZoomModal, { useCardZoom } from "./CardZoomModal.jsx";
 import ItemImage, { slabPhoto } from "./ItemImage.jsx";
 import Dashboard from "./Dashboard.jsx";
+import SportsCards from "./SportsCards.jsx";
 import {
   money,
   cardTitle,
@@ -1926,6 +1927,8 @@ function App() {
             </div>
           )}
       </section>
+
+      <SportsCards />
 
       {smallHitsMounted && (
         <div

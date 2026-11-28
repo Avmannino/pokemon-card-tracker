@@ -9,8 +9,9 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 
-from . import cache, db
+from . import cache, db, sports_api
 from .config import settings
 from .schemas import (
     AddCollectionRequest,
@@ -19,7 +20,7 @@ from .schemas import (
     QuantityRequest,
     VariantChangeRequest,
 )
-from .services import grading, poketrace, price_sync, pricecharting
+from .services import cardsight, grading, poketrace, price_sync, pricecharting
 from .services.portfolio import build_dashboard, lot_price, value_changes
 from .services.valuation import (
     build_market_values,
@@ -58,11 +59,31 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 @app.middleware("http")
 async def clear_cache_after_changes(request: Request, call_next):
     """Any write (adding, removing, editing cards or prices) makes the cached
-    collection and dashboard out of date."""
+    collection and dashboard out of date. Sports cards aren't part of them."""
     response = await call_next(request)
-    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and not request.url.path.startswith(
+        "/api/sports/"
+    ):
         cache.invalidate()
     return response
+
+
+app.include_router(sports_api.router)
+
+
+@app.exception_handler(db.SportsTablesMissing)
+async def sports_tables_missing(request: Request, exc: db.SportsTablesMissing) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(cardsight.CardSightUnavailable)
+async def cardsight_unavailable(request: Request, exc: cardsight.CardSightUnavailable) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(cardsight.CardSightError)
+async def cardsight_failed(request: Request, exc: cardsight.CardSightError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
 def _variant_info(item: dict[str, Any], card: dict[str, Any]) -> dict[str, Any]:

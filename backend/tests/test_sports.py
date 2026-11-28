@@ -1,0 +1,392 @@
+"""The Sports section: CardSight price summaries, search, call budget,
+valuation, grading and the /api/sports endpoints (no network, no database).
+
+Run from backend/:  python -m unittest discover -t . -s tests -v
+"""
+
+import asyncio
+import itertools
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest import mock
+
+from fastapi.testclient import TestClient
+
+from app import db, main, sports_api
+from app.services import cardsight, sports, state_store
+from tests.test_pricing import FakeState
+
+
+BO = "6927b8b8-2f70-4f87-b273-e4982dc62ee6"
+GRIFFEY = "380da6da-7b74-4e31-8418-f23e07653cc3"
+
+
+def sale(price, day, title="1991 Stadium Club Bo Jackson #224", image=None):
+    return {
+        "title": title,
+        "price": price,
+        "date": f"2026-11-{day:02d}T12:00:00Z",
+        "source": "ebay",
+        "listing_type": "auction",
+        "url": f"https://example.test/{day}",
+        "image_url": image,
+    }
+
+
+def pricing_data(raw=(), psa10=(), psa9=(), bgs95=()):
+    graded = []
+    psa = [
+        {"grade_value": value, "grade_id": value, "count": len(records), "records": list(records)}
+        for value, records in (("10", psa10), ("9", psa9))
+        if records
+    ]
+    if psa:
+        graded.append({"company_name": "PSA", "company_id": "psa", "grades": psa})
+    if bgs95:
+        graded.append(
+            {
+                "company_name": "BGS",
+                "company_id": "bgs",
+                "grades": [{"grade_value": "9.5", "count": len(bgs95), "records": list(bgs95)}],
+            }
+        )
+    return {
+        "card": {
+            "card_id": BO,
+            "name": "Bo Jackson",
+            "number": "224",
+            "set": {"set_id": "s", "name": "Base Set", "year": "1991", "release": "Stadium Club"},
+        },
+        "raw": {"count": len(raw), "records": list(raw)},
+        "graded": graded,
+        "meta": {"last_sale_date": "2026-11-18T01:12:30Z"},
+    }
+
+
+class SummarizeTests(unittest.TestCase):
+    def test_values_are_medians_of_recent_single_card_sales(self):
+        raw = [sale(1.0 + day / 10, day, image=f"https://i.ebayimg.com/{day}.jpg") for day in range(1, 15)]
+        raw.append(sale(40.0, 28, title="1991 Stadium Club lot of 25 Bo Jackson"))
+        summary = cardsight.summarize(
+            pricing_data(raw=raw, psa10=[sale(230, 3), sale(240, 9)], bgs95=[sale(90, 2)])
+        )
+
+        # The lot is ignored; the 10 newest (days 5-14) give a median of 1.95.
+        self.assertEqual(summary["grades"]["RAW"]["value"], 1.95)
+        self.assertEqual(summary["grades"]["RAW"]["sales"], 14)
+        self.assertEqual(summary["grades"]["RAW"]["used"], 10)
+        self.assertEqual(summary["grades"]["RAW"]["last_sale"], "2026-11-14T12:00:00Z")
+        self.assertEqual(summary["grades"]["PSA_10"]["value"], 235)
+        self.assertEqual(summary["grades"]["BGS_9.5"]["value"], 90)
+        self.assertNotIn("PSA_9", summary["grades"])
+        self.assertEqual(summary["photo_url"], "https://i.ebayimg.com/14.jpg")
+        self.assertEqual(summary["card"]["release_name"], "Stadium Club")
+
+    def test_grade_keys(self):
+        self.assertEqual(cardsight.grade_key("PSA", "10"), "PSA_10")
+        self.assertEqual(cardsight.grade_key("psa", "9.0"), "PSA_9")
+        self.assertEqual(cardsight.grade_key("BGS", "9.5"), "BGS_9.5")
+
+    def test_league_from_team_attribute(self):
+        self.assertEqual(cardsight.league(["RC", "MLB-KCR"]), "MLB")
+        self.assertEqual(cardsight.league(["NFL-LV"]), "NFL")
+        self.assertIsNone(cardsight.league(["RC"]))
+
+
+def catalog_card(card_id, name, year="1991", release="Stadium Club", number="270", set_name="Base Set"):
+    return {
+        "id": card_id, "name": name, "number": number, "releaseYear": year,
+        "releaseName": release, "setName": set_name, "attributes": ["MLB-SEA"],
+    }
+
+
+class SearchTests(unittest.TestCase):
+    def test_retries_by_surname_when_the_full_name_finds_nothing(self):
+        calls = []
+
+        async def fake_catalog(params):
+            calls.append(params)
+            if params["name"] == "Griffey":
+                return [
+                    catalog_card(GRIFFEY, "Ken Griffey, Jr."),
+                    catalog_card("x" * 36, "Craig Griffey"),
+                ]
+            return []
+
+        with mock.patch.object(cardsight, "_catalog", fake_catalog):
+            results = asyncio.run(cardsight.search_cards("Ken Griffey Jr.", "1991", "#270"))
+
+        self.assertEqual([call["name"] for call in calls], ["Ken Griffey Jr.", "Griffey"])
+        self.assertEqual(calls[0]["number"], "270")
+        self.assertEqual([card["cardsight_id"] for card in results], [GRIFFEY])
+        self.assertEqual(results[0]["league"], "MLB")
+
+    def test_set_words_rank_matching_releases_first(self):
+        async def fake_catalog(params):
+            return [
+                catalog_card("a" * 36, "Bo Jackson", release="Topps", number="170"),
+                catalog_card("b" * 36, "Bo Jackson", release="Stadium Club", number="224"),
+            ]
+
+        with mock.patch.object(cardsight, "_catalog", fake_catalog):
+            results = asyncio.run(cardsight.search_cards("Bo Jackson", set_query="stadium club"))
+
+        self.assertEqual(results[0]["cardsight_id"], "b" * 36)
+
+
+class BudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.state = FakeState()
+        for patcher in (
+            mock.patch.object(state_store, "get", self.state.get),
+            mock.patch.object(state_store, "set", self.state.set),
+            mock.patch.object(cardsight.settings, "cardsight_api_key", "test-key"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_counts_by_month_and_stops_near_the_limit(self):
+        self.state.set(cardsight.USAGE_KEY, {"month": "2020-01", "calls": 700})
+        self.assertEqual(cardsight.usage()["calls"], 0)
+
+        cardsight._count_call()
+        self.assertEqual(cardsight.usage()["calls"], 1)
+
+        self.state.set(cardsight.USAGE_KEY, {"month": cardsight._month(), "calls": cardsight.STOP_AT})
+        with self.assertRaises(cardsight.CardSightUnavailable):
+            cardsight._check_budget()
+
+    def test_no_key_means_unavailable(self):
+        with mock.patch.object(cardsight.settings, "cardsight_api_key", ""):
+            with self.assertRaises(cardsight.CardSightUnavailable):
+                cardsight._check_budget()
+
+
+def priced_card(card_id="card-1", raw=3.0, psa9=96.0, psa10=946.0, sales=10):
+    grades = {}
+    for key, value in (("RAW", raw), ("PSA_9", psa9), ("PSA_10", psa10)):
+        if value is not None:
+            grades[key] = {"value": value, "sales": sales, "used": min(sales, 10), "last_sale": "2026-11-20T00:00:00Z"}
+    return {
+        "id": card_id, "cardsight_id": BO, "name": "Randy Johnson", "number": "287",
+        "year": "1989", "release_name": "Topps Big", "set_name": "Base Set",
+        "attributes": ["MLB-MON"],
+        "prices": {"grades": grades, "photo_url": "https://i.ebayimg.com/rj.jpg"},
+        "priced_at": "2026-11-28T09:17:00+00:00",
+    }
+
+
+class ValuationTests(unittest.TestCase):
+    def test_owned_grade_value_and_manual_override(self):
+        card = priced_card()
+        items = [
+            {"id": "i1", "sports_card_id": "card-1", "quantity": 2, "ownership_grade": "RAW", "manual_value": None},
+            {"id": "i2", "sports_card_id": "card-1", "quantity": 1, "ownership_grade": "PSA_9", "manual_value": None},
+            {"id": "i3", "sports_card_id": "card-1", "quantity": 1, "ownership_grade": "PSA_8", "manual_value": "45.00"},
+            {"id": "i4", "sports_card_id": "card-1", "quantity": 1, "ownership_grade": "PSA_7", "manual_value": None},
+        ]
+        result = sports.build_collection(items, {"card-1": card}, grading_cost=30)
+        rows = {row["id"]: row for row in result["items"]}
+
+        self.assertEqual(rows["i1"]["value_total"], 6.0)
+        self.assertEqual(rows["i2"]["value_each"], 96.0)
+        self.assertEqual((rows["i3"]["value_each"], rows["i3"]["value_source"]), (45.0, "manual"))
+        self.assertIsNone(rows["i4"]["value_total"])
+        self.assertEqual(result["summary"]["total_value"], 147.0)
+        self.assertEqual(result["summary"]["missing_values"], 1)
+        self.assertEqual(result["summary"]["card_count"], 5)
+
+        # Only raw cards get a grading outlook.
+        self.assertTrue(rows["i1"]["grading"]["available"])
+        self.assertEqual(rows["i1"]["grading"]["psa10_net"], 913.0)
+        self.assertIsNone(rows["i2"]["grading"])
+
+    def test_missing_graded_sales_explained(self):
+        outlook = sports.grading_outlook(priced_card(psa10=None), 30)
+        self.assertFalse(outlook["available"])
+        self.assertEqual(outlook["unavailable_reason"], "No PSA 10 sales in the past year.")
+
+        outlook = sports.grading_outlook(priced_card(raw=None), 30, raw_override=5.0)
+        self.assertTrue(outlook["available"])
+        self.assertEqual(outlook["raw_value"], 5.0)
+
+
+class FakeSportsDB:
+    def __init__(self):
+        self.ids = itertools.count(1)
+        self.cards = {}
+        self.items = {}
+
+    def save_sports_card(self, card, prices=None):
+        payload = db._sports_card_payload(card, prices)
+        for row in self.cards.values():
+            if row["cardsight_id"] == card["cardsight_id"]:
+                row.update(payload)
+                return row
+        row = {"id": f"sc-{next(self.ids)}", "prices": None, "priced_at": None, **payload}
+        self.cards[row["id"]] = row
+        return row
+
+    def save_sports_card_prices(self, updates):
+        for card, prices in updates:
+            self.save_sports_card(card, prices)
+
+    def get_sports_cards(self, card_ids=None):
+        return {k: v for k, v in self.cards.items() if card_ids is None or k in set(card_ids)}
+
+    def get_sports_cards_by_cardsight_ids(self, ids):
+        return {row["cardsight_id"]: row for row in self.cards.values() if row["cardsight_id"] in set(ids)}
+
+    def get_owned_sports_cards(self):
+        used = {item["sports_card_id"] for item in self.items.values()}
+        return [row for row in self.cards.values() if row["id"] in used]
+
+    def delete_sports_card(self, card_id):
+        self.cards.pop(card_id, None)
+
+    def get_sports_items(self):
+        return list(self.items.values())
+
+    def get_sports_item(self, item_id):
+        return self.items.get(item_id)
+
+    def add_sports_item(self, sports_card_id, quantity, ownership_grade, notes=None, manual_value=None, manual_source_url=None):
+        item = {
+            "id": f"si-{next(self.ids)}", "sports_card_id": sports_card_id, "quantity": quantity,
+            "ownership_grade": ownership_grade, "notes": notes, "manual_value": manual_value,
+            "manual_source_url": manual_source_url, "created_at": "2026-11-28T00:00:00+00:00",
+        }
+        self.items[item["id"]] = item
+        return item
+
+    def update_sports_item(self, item_id, fields):
+        self.items[item_id].update(fields)
+        return self.items[item_id]
+
+    def delete_sports_item(self, item_id):
+        self.items.pop(item_id, None)
+
+    def sports_card_in_use(self, card_id):
+        return any(item["sports_card_id"] == card_id for item in self.items.values())
+
+
+BO_REF = {
+    "cardsight_id": BO, "name": "Bo Jackson", "number": "224", "year": "1991",
+    "release_name": "Stadium Club", "set_name": "Base Set", "attributes": ["MLB-KCR"],
+}
+
+
+class SportsApiTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = FakeSportsDB()
+        self.state = FakeState()
+        self.pricing_calls = []
+
+        async def fake_get_prices(ids):
+            self.pricing_calls.append(list(ids))
+            return {
+                cardsight_id: cardsight.summarize(
+                    pricing_data(raw=[sale(1.29, 18)], psa9=[sale(22.75, 10)], psa10=[sale(233.25, 12)])
+                )
+                for cardsight_id in ids
+                if cardsight_id == BO
+            }
+
+        patches = [
+            mock.patch.object(state_store, "get", self.state.get),
+            mock.patch.object(state_store, "set", self.state.set),
+            mock.patch.object(cardsight, "get_prices", fake_get_prices),
+            mock.patch.object(cardsight.settings, "cardsight_api_key", "test-key"),
+        ]
+        for name in (
+            "save_sports_card", "save_sports_card_prices", "get_sports_cards",
+            "get_sports_cards_by_cardsight_ids", "get_owned_sports_cards", "delete_sports_card",
+            "get_sports_items", "get_sports_item", "add_sports_item", "update_sports_item",
+            "delete_sports_item", "sports_card_in_use",
+        ):
+            patches.append(mock.patch.object(db, name, getattr(self.fake, name)))
+        for patcher in patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        sports_api._price_cache.clear()
+        sports_api._search_cache.clear()
+        sports._refreshing = False
+        self.client = TestClient(main.app)
+
+    def test_check_then_add_uses_one_pricing_call(self):
+        response = self.client.post("/api/sports/prices", json={"cardsight_ids": [BO, GRIFFEY]})
+        self.assertEqual(response.status_code, 200)
+        prices = response.json()["prices"]
+        self.assertEqual(prices[BO]["grades"]["PSA_10"]["value"], 233.25)
+        self.assertTrue(prices[BO]["grading"]["available"])
+        self.assertEqual(prices[GRIFFEY]["grades"], {})
+
+        response = self.client.post("/api/sports/items", json={"card": BO_REF, "quantity": 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.pricing_calls, [[BO, GRIFFEY]])
+
+        collection = self.client.get("/api/sports/collection").json()
+        self.assertEqual(collection["summary"]["total_value"], 2.58)
+        self.assertEqual(collection["items"][0]["card"]["league"], "MLB")
+        self.assertEqual(self.pricing_calls, [[BO, GRIFFEY]])
+
+    def test_adding_the_same_card_and_grade_adds_to_quantity(self):
+        self.client.post("/api/sports/items", json={"card": BO_REF})
+        response = self.client.post("/api/sports/items", json={"card": BO_REF, "quantity": 2})
+        self.assertTrue(response.json()["merged"])
+        self.assertEqual([item["quantity"] for item in self.fake.items.values()], [3])
+
+        self.client.post("/api/sports/items", json={"card": BO_REF, "ownership_grade": "PSA_9"})
+        self.assertEqual(len(self.fake.items), 2)
+
+    def test_manual_value_and_removal(self):
+        item = self.client.post("/api/sports/items", json={"card": BO_REF}).json()["item"]
+
+        response = self.client.patch(
+            f"/api/sports/items/{item['id']}",
+            json={"manual_value": 12.5, "manual_source_url": " https://example.test/comp "},
+        )
+        self.assertEqual(response.json()["item"]["manual_source_url"], "https://example.test/comp")
+        collection = self.client.get("/api/sports/collection").json()
+        self.assertEqual(collection["items"][0]["value_source"], "manual")
+
+        response = self.client.patch(f"/api/sports/items/{item['id']}", json={"manual_value": None})
+        self.assertIsNone(response.json()["item"]["manual_source_url"])
+
+        self.assertEqual(self.client.delete(f"/api/sports/items/{item['id']}").status_code, 200)
+        self.assertEqual(self.fake.cards, {})
+
+    def test_refresh_reprices_owned_cards_with_a_cooldown_for_the_button(self):
+        self.client.post("/api/sports/items", json={"card": BO_REF})
+        self.pricing_calls.clear()
+
+        response = self.client.post("/api/sports/refresh")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["priced"], 1)
+        self.assertEqual(self.pricing_calls, [[BO]])
+
+        self.assertEqual(self.client.post("/api/sports/refresh").status_code, 429)
+        self.assertEqual(self.client.post("/api/sports/refresh?reason=scheduled").status_code, 200)
+
+    def test_missing_tables_and_key_are_explained(self):
+        def missing():
+            raise db.SportsTablesMissing("Run supabase/migrations/2026-11-28_sports_cards.sql in Supabase first.")
+
+        with mock.patch.object(db, "get_sports_items", missing):
+            response = self.client.get("/api/sports/collection")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("2026-11-28_sports_cards.sql", response.json()["detail"])
+
+        with mock.patch.object(cardsight.settings, "cardsight_api_key", ""):
+            response = self.client.get("/api/sports/search?name=Bo%20Jackson")
+        self.assertEqual(response.status_code, 503)
+
+    def test_sports_writes_leave_the_pokemon_cache_alone(self):
+        with mock.patch.object(main.cache, "invalidate") as invalidate:
+            self.client.post("/api/sports/items", json={"card": BO_REF})
+        invalidate.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

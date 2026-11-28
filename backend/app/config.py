@@ -26,6 +26,9 @@ class Settings:
         self.poketrace_api_key = os.getenv("POKETRACE_API_KEY", "").strip()
         # Optional: graded (PSA) prices are only pulled when this is set.
         self.rapidapi_key = os.getenv("RAPIDAPI_KEY", "").strip()
+        # Optional: the Sports section (CardSight AI catalog and prices) only
+        # works when this is set.
+        self.cardsight_api_key = os.getenv("CARDSIGHT_API_KEY", "").strip()
         # Default grading cost per card for Grading Opportunities (the page
         # can use its own).
         try:

@@ -450,6 +450,29 @@ link fall back to stored TCGGO prices. The score formula is in
 `backend/app/services/grading.py` and explained on the page. Market
 opportunity only; the actual grade depends on the card's condition.
 
+## Sports cards
+
+The **Sports** section (below the collection) tracks sports cards with
+[CardSight AI](https://cardsight.ai) (free plan: 750 calls a month). Values
+are the median of each grade's most recent eBay auction sales (up to 10)
+from the past year. Each raw card also gets the same grading score as the
+Pokémon cards. Sports cards have their own total and are not part of the
+performance chart, because CardSight's terms don't allow keeping price
+history. Each card's prices are a cache that the daily refresh replaces.
+
+Setup:
+
+1. Run `supabase/migrations/2026-11-28_sports_cards.sql` in the Supabase SQL editor.
+2. Add `CARDSIGHT_API_KEY` to `backend/.env` and to the Render service's environment.
+3. The GitHub Action `.github/workflows/sports-prices.yml` reprices every
+   sports card daily at 9:17 ET. That's one call per 100 cards, so about 30 to 60 calls a month.
+
+Calls: a search is 1 call. **Show values** prices up to 100 search results in 1 call.
+Opening a card to add it is 1 call, or free if you checked it in the last few hours.
+Adding it after that is free. **Refresh Prices** is 1 call per 100 cards. The app
+counts its own calls and stops at 735 a month. CardSight's dashboard has the
+true count. For a card with no sales, use **Edit → Your value**.
+
 # 11. Current project structure
 
 ```text

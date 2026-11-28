@@ -439,6 +439,163 @@ def insert_price_snapshots(rows: list[dict[str, Any]]) -> None:
         _client().table("price_snapshots").insert(payload[start:start + 500]).execute()
 
 
+class SportsTablesMissing(Exception):
+    """supabase/migrations/2026-11-28_sports_cards.sql hasn't been run."""
+
+
+def _sports(build):
+    """Runs a sports table query, turning "table doesn't exist" into
+    SportsTablesMissing."""
+    try:
+        return build()
+    except Exception as exc:
+        text = str(exc)
+        if "PGRST205" in text or "42P01" in text or (
+            "sports_" in text and ("does not exist" in text or "schema cache" in text)
+        ):
+            raise SportsTablesMissing(
+                "Run supabase/migrations/2026-11-28_sports_cards.sql in Supabase first."
+            ) from exc
+        raise
+
+
+def _sports_card_payload(card: dict[str, Any], prices: dict[str, Any] | None) -> dict[str, Any]:
+    """A sports_cards row from catalog details (`card`), refreshed with the
+    details in `prices` when CardSight sent them."""
+    fresh = (prices or {}).get("card") or {}
+    payload = {
+        "cardsight_id": card["cardsight_id"],
+        "name": fresh.get("name") or card.get("name") or "Card",
+        "number": fresh.get("number") or card.get("number"),
+        "year": fresh.get("year") or card.get("year"),
+        "release_name": fresh.get("release_name") or card.get("release_name"),
+        "set_name": fresh.get("set_name") or card.get("set_name"),
+        "attributes": card.get("attributes") or [],
+        "updated_at": utc_now_iso(),
+    }
+    if prices is not None:
+        payload["prices"] = prices
+        payload["priced_at"] = prices.get("priced_at") or utc_now_iso()
+    return payload
+
+
+def save_sports_card(card: dict[str, Any], prices: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Inserts or updates the card by its CardSight id."""
+    response = _sports(
+        lambda: _client().table("sports_cards")
+        .upsert(_sports_card_payload(card, prices), on_conflict="cardsight_id")
+        .execute()
+    )
+    return response.data[0]
+
+
+def save_sports_card_prices(updates: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
+    """Replaces the cached prices of many cards: (saved row, summary)."""
+    payload = [_sports_card_payload(card, prices) for card, prices in updates]
+    for start in range(0, len(payload), 500):
+        _sports(
+            lambda: _client().table("sports_cards")
+            .upsert(payload[start:start + 500], on_conflict="cardsight_id")
+            .execute()
+        )
+
+
+def get_sports_cards(card_ids=None) -> dict[str, dict[str, Any]]:
+    """By row id; every card when `card_ids` is None."""
+    def build():
+        query = _client().table("sports_cards").select("*")
+        if card_ids is not None:
+            query = query.in_("id", list(card_ids))
+        return query.order("id")
+
+    if card_ids is not None and not list(card_ids):
+        return {}
+    return {row["id"]: row for row in _sports(lambda: _fetch_all(build))}
+
+
+def get_sports_cards_by_cardsight_ids(cardsight_ids) -> dict[str, dict[str, Any]]:
+    ids = list(cardsight_ids)
+    if not ids:
+        return {}
+    rows = _sports(
+        lambda: _client().table("sports_cards").select("*").in_("cardsight_id", ids).execute().data
+    ) or []
+    return {row["cardsight_id"]: row for row in rows}
+
+
+def get_owned_sports_cards() -> list[dict[str, Any]]:
+    items = get_sports_items()
+    return list(get_sports_cards({item["sports_card_id"] for item in items}).values())
+
+
+def delete_sports_card(card_id: str) -> None:
+    _sports(lambda: _client().table("sports_cards").delete().eq("id", card_id).execute())
+
+
+def get_sports_items() -> list[dict[str, Any]]:
+    return _sports(
+        lambda: _fetch_all(
+            lambda: _client().table("sports_items").select("*").order("created_at").order("id")
+        )
+    )
+
+
+def get_sports_item(item_id: str) -> dict[str, Any] | None:
+    rows = _sports(
+        lambda: _client().table("sports_items").select("*").eq("id", item_id).limit(1).execute().data
+    )
+    return rows[0] if rows else None
+
+
+def add_sports_item(
+    sports_card_id: str,
+    quantity: int,
+    ownership_grade: str,
+    notes: str | None = None,
+    manual_value: float | None = None,
+    manual_source_url: str | None = None,
+) -> dict[str, Any]:
+    response = _sports(
+        lambda: _client().table("sports_items").insert(
+            {
+                "sports_card_id": sports_card_id,
+                "quantity": quantity,
+                "ownership_grade": ownership_grade,
+                "notes": notes,
+                "manual_value": manual_value,
+                "manual_source_url": manual_source_url,
+            }
+        ).execute()
+    )
+    return response.data[0]
+
+
+def update_sports_item(item_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    response = _sports(
+        lambda: _client().table("sports_items")
+        .update({**fields, "updated_at": utc_now_iso()})
+        .eq("id", item_id)
+        .execute()
+    )
+    return response.data[0] if response.data else None
+
+
+def delete_sports_item(item_id: str) -> None:
+    _sports(lambda: _client().table("sports_items").delete().eq("id", item_id).execute())
+
+
+def sports_card_in_use(sports_card_id: str) -> bool:
+    rows = _sports(
+        lambda: _client().table("sports_items")
+        .select("id")
+        .eq("sports_card_id", sports_card_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return bool(rows)
+
+
 def get_price_snapshots(card_id: str, limit: int = 500) -> list[dict[str, Any]]:
     response = (
         _client().table("price_snapshots")

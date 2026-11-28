@@ -1,0 +1,78 @@
+name: Sports Prices Refresh
+
+# Once a day, reprices every sports card you own from CardSight AI: one
+# call per 100 cards, about 30-60 of the free plan's 750 calls a month.
+# Page loads never call CardSight.
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "17 9 * * *"
+      timezone: "America/New_York"
+
+concurrency:
+  group: sports-prices-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-sports-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      BACKEND_URL: ${{ vars.BACKEND_URL }}
+
+    steps:
+      - name: Wake Render backend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            RESPONSE="$(curl -fsS --max-time 30 "$BACKEND_URL/health" || true)"
+
+            if echo "$RESPONSE" | grep -q '"status":"ok"'; then
+              echo "Backend is awake and healthy."
+              exit 0
+            fi
+
+            echo "Waiting for Render to wake... attempt $attempt/30"
+            sleep 10
+          done
+
+          echo "Backend did not become healthy."
+          exit 1
+
+      - name: Refresh sports prices
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..10}; do
+            HTTP_STATUS="$(
+              curl -sS -o response.json -w "%{http_code}" --max-time 180 -X POST \
+                "$BACKEND_URL/api/sports/refresh?reason=scheduled"
+            )"
+
+            echo "Refresh endpoint returned HTTP $HTTP_STATUS"
+            cat response.json
+            echo
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              exit 0
+            fi
+
+            if [ "$HTTP_STATUS" = "409" ]; then
+              echo "A refresh is already running; retrying in 30s ($attempt/10)."
+              sleep 30
+              continue
+            fi
+
+            # 503: no API key or tables yet, or this month's calls are used
+            # up. Nothing to retry.
+            exit 1
+          done
+
+          echo "Couldn't start: another refresh stayed busy."
+          exit 1

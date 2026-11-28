@@ -59,6 +59,43 @@ class VariantChangeRequest(BaseModel):
     poketrace_id: str = Field(min_length=8, max_length=64)
 
 
+SportsGrade = Literal["RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10"]
+CARDSIGHT_ID = r"^[0-9a-fA-F-]{36}$"
+
+
+class SportsCardRef(BaseModel):
+    # A card from the sports search (cardsight.normalize_card).
+    cardsight_id: str = Field(pattern=CARDSIGHT_ID)
+    name: str = Field(min_length=1, max_length=200)
+    number: str | None = Field(default=None, max_length=40)
+    year: str | None = Field(default=None, max_length=10)
+    release_name: str | None = Field(default=None, max_length=200)
+    set_name: str | None = Field(default=None, max_length=200)
+    attributes: list[str] = Field(default_factory=list, max_length=20)
+
+
+class SportsAddRequest(BaseModel):
+    card: SportsCardRef
+    quantity: int = Field(default=1, ge=1, le=999)
+    ownership_grade: SportsGrade = "RAW"
+    notes: str | None = Field(default=None, max_length=2000)
+    manual_value: float | None = Field(default=None, ge=0)
+    manual_source_url: str | None = Field(default=None, max_length=500)
+
+
+class SportsItemUpdate(BaseModel):
+    # Only the fields sent are changed; manual_value null clears your value.
+    quantity: int | None = Field(default=None, ge=1, le=999)
+    ownership_grade: SportsGrade | None = None
+    manual_value: float | None = Field(default=None, ge=0)
+    manual_source_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class SportsPricesRequest(BaseModel):
+    cardsight_ids: list[str] = Field(min_length=1, max_length=100)
+
+
 class GradedValuesRequest(BaseModel):
     source: str = Field(min_length=2, max_length=120)
     source_url: str | None = None
