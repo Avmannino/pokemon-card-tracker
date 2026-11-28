@@ -127,6 +127,12 @@ class ApiTestCase(unittest.TestCase):
             mock.patch.object(state_store, "set", self.state.set),
             mock.patch.object(poketrace, "_request", no_network),
             mock.patch.object(tcggo, "_get", no_network),
+            # Sports totals are tested in test_sports.
+            mock.patch.object(
+                main,
+                "_load_sports_totals",
+                lambda: {"sports_total": 0.0, "sports_card_count": 0, "sports_history": []},
+            ),
         ]
         for name in (
             "get_card", "save_card", "add_collection_item", "get_collection_item",

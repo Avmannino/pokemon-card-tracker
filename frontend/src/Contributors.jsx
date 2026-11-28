@@ -50,9 +50,15 @@ export function Contributors({ attribution, range, onZoom }) {
               <div className="sync-change-copy">
                 <strong>{cardTitle(entry.card)}</strong>
                 <span>
-                  {gradeLabel(entry.grade)}
-                  {entry.quantity > 1 ? ` · ×${entry.quantity}` : ""}
-                  {entry.quantity === 0 ? " · no longer held" : ""}
+                  {entry.kind === "sports" ? (
+                    entry.card.set_name
+                  ) : (
+                    <>
+                      {gradeLabel(entry.grade)}
+                      {entry.quantity > 1 ? ` · ×${entry.quantity}` : ""}
+                      {entry.quantity === 0 ? " · no longer held" : ""}
+                    </>
+                  )}
                 </span>
               </div>
 

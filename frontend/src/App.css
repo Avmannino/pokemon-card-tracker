@@ -4300,3 +4300,67 @@ a.manual-source-link:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* The hero: the combined value, then Pokémon and sports each in their own
+   card beside it. */
+.hero {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+
+  gap: 16px;
+}
+
+.portfolio-card.portfolio-part {
+  padding: 24px;
+
+  border-color: #222a3a;
+
+  background: rgba(16, 21, 31, 0.94);
+}
+
+.portfolio-part strong {
+  font-size: 1.7rem;
+}
+
+button.portfolio-card {
+  width: 100%;
+
+  color: inherit;
+
+  font: inherit;
+
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.sports-part:hover {
+  border-color: #3a4560;
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hero > .portfolio-card:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .hero {
+    gap: 10px;
+  }
+
+  .portfolio-card.portfolio-part {
+    padding: 16px;
+  }
+
+  .portfolio-part strong {
+    font-size: 1.3rem;
+  }
+
+  .portfolio-part small {
+    font-size: 0.72rem;
+  }
+}

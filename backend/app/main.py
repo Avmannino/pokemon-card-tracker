@@ -20,7 +20,7 @@ from .schemas import (
     QuantityRequest,
     VariantChangeRequest,
 )
-from .services import cardsight, grading, poketrace, price_sync, pricecharting
+from .services import cardsight, grading, poketrace, price_sync, pricecharting, sports
 from .services.portfolio import build_dashboard, lot_price, value_changes
 from .services.valuation import (
     build_market_values,
@@ -59,11 +59,10 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 @app.middleware("http")
 async def clear_cache_after_changes(request: Request, call_next):
     """Any write (adding, removing, editing cards or prices) makes the cached
-    collection and dashboard out of date. Sports cards aren't part of them."""
+    collection and dashboard out of date - sports cards included, since
+    their total is part of both. Checking sports prices changes nothing."""
     response = await call_next(request)
-    if request.method in ("POST", "PUT", "PATCH", "DELETE") and not request.url.path.startswith(
-        "/api/sports/"
-    ):
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path != "/api/sports/prices":
         cache.invalidate()
     return response
 
@@ -202,6 +201,36 @@ def _load_collection_data() -> dict[str, Any]:
         "cards": db.get_cards(card_ids),
         "snapshots": db.get_price_snapshots_for_cards(card_ids),
         "last_syncs": price_sync.last_finished_syncs(),
+        **_load_sports_totals(),
+    }
+
+
+def _load_sports_totals() -> dict[str, Any]:
+    """The sports collection's current total and its totals over time, for
+    the overall value, chart and performance numbers. Empty until the sports
+    tables exist."""
+    try:
+        sports_items = db.get_sports_items()
+        sports_cards = db.get_sports_cards({item["sports_card_id"] for item in sports_items})
+    except Exception:
+        logger.warning("Sports cards unavailable; leaving them out of the totals", exc_info=True)
+        return {"sports_total": 0.0, "sports_card_count": 0, "sports_history": []}
+
+    total = sports.collection_total(sports_items, sports_cards)
+    try:
+        history = db.get_sports_value_history()
+    except Exception:
+        logger.warning(
+            "sports_value_history unavailable; run "
+            "supabase/migrations/2026-11-29_sports_value_history.sql",
+            exc_info=True,
+        )
+        history = []
+
+    return {
+        "sports_total": total,
+        "sports_card_count": sum(int(item.get("quantity") or 1) for item in sports_items),
+        "sports_history": sports.history_rows(history, total, datetime.now(timezone.utc)),
     }
 
 
@@ -223,12 +252,21 @@ def _build_collection(data: dict[str, Any]) -> dict[str, Any]:
         if item["owned_market_value_total"] is not None
     ]
 
+    pokemon_total = round(sum(known_totals), 2)
+    sports_total = data.get("sports_total", 0.0)
+
     return {
         "items": serialized,
         "summary": {
             "item_count": len(serialized),
-            # Includes the small hits, which are part of your collection.
-            "known_market_total": round(sum(known_totals), 2),
+            # Pokemon only; includes the small hits, which are part of your
+            # collection.
+            "known_market_total": pokemon_total,
+            "pokemon_total": pokemon_total,
+            "sports_total": sports_total,
+            "sports_card_count": data.get("sports_card_count", 0),
+            # Pokemon and sports together.
+            "combined_total": round(pokemon_total + sports_total, 2),
             "small_hits_count": sum(1 for item in serialized if item.get("small_hit")),
             "small_hits_total": round(
                 sum(
@@ -258,6 +296,7 @@ def _build_responses() -> dict[str, Any]:
         snapshots_by_card=data["snapshots"],
         events_recorded=data["events_recorded"],
         last_syncs=data["last_syncs"],
+        sports_history=data.get("sports_history"),
     )
 
     collection = _build_collection(data)

@@ -591,6 +591,41 @@ def sports_card_in_use(sports_card_id: str) -> bool:
     return bool(rows)
 
 
+def get_sports_value_history() -> list[dict[str, Any]]:
+    """The sports collection's total over time, oldest first. Raises if
+    supabase/migrations/2026-11-29_sports_value_history.sql hasn't been run."""
+    return _fetch_all(
+        lambda: _client().table("sports_value_history")
+        .select("*")
+        .order("recorded_at")
+        .order("id")
+    )
+
+
+def get_last_sports_value() -> dict[str, Any] | None:
+    rows = (
+        _client().table("sports_value_history")
+        .select("*")
+        .order("recorded_at", desc=True)
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return rows[0] if rows else None
+
+
+def insert_sports_value(total_value: float, flow: float, kind: str) -> None:
+    _client().table("sports_value_history").insert(
+        {
+            "recorded_at": utc_now_iso(),
+            "total_value": round(total_value, 2),
+            "flow": round(flow, 2),
+            "kind": kind,
+        }
+    ).execute()
+
+
 def get_price_snapshots(card_id: str, limit: int = 500) -> list[dict[str, Any]]:
     response = (
         _client().table("price_snapshots")

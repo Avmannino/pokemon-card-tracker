@@ -216,6 +216,7 @@ class FakeSportsDB:
         self.ids = itertools.count(1)
         self.cards = {}
         self.items = {}
+        self.history = []
 
     def save_sports_card(self, card, prices=None):
         payload = db._sports_card_payload(card, prices)
@@ -265,6 +266,18 @@ class FakeSportsDB:
     def sports_card_in_use(self, card_id):
         return any(item["sports_card_id"] == card_id for item in self.items.values())
 
+    def get_last_sports_value(self):
+        return self.history[-1] if self.history else None
+
+    def insert_sports_value(self, total_value, flow, kind):
+        self.history.append(
+            {"recorded_at": datetime.now(timezone.utc).isoformat(), "total_value": round(total_value, 2),
+             "flow": round(flow, 2), "kind": kind}
+        )
+
+    def get_sports_value_history(self):
+        return list(self.history)
+
 
 BO_REF = {
     "cardsight_id": BO, "name": "Bo Jackson", "number": "224", "year": "1991",
@@ -298,7 +311,8 @@ class SportsApiTests(unittest.TestCase):
             "save_sports_card", "save_sports_card_prices", "get_sports_cards",
             "get_sports_cards_by_cardsight_ids", "delete_sports_card",
             "get_sports_items", "get_sports_item", "add_sports_item", "update_sports_item",
-            "delete_sports_item", "sports_card_in_use",
+            "delete_sports_item", "sports_card_in_use", "get_last_sports_value",
+            "insert_sports_value", "get_sports_value_history",
         ):
             patches.append(mock.patch.object(db, name, getattr(self.fake, name)))
         for patcher in patches:
@@ -407,10 +421,64 @@ class SportsApiTests(unittest.TestCase):
             response = self.client.get("/api/sports/search?name=Bo%20Jackson")
         self.assertEqual(response.status_code, 503)
 
-    def test_sports_writes_leave_the_pokemon_cache_alone(self):
+    def test_sports_writes_refresh_the_dashboard_but_price_checks_dont(self):
         with mock.patch.object(main.cache, "invalidate") as invalidate:
+            self.client.post("/api/sports/prices", json={"cardsight_ids": [BO]})
+            invalidate.assert_not_called()
             self.client.post("/api/sports/items", json={"card": BO_REF})
-        invalidate.assert_not_called()
+        invalidate.assert_called()
+
+    def test_every_change_records_the_sports_total(self):
+        # Added at $1.29 x 2: all of it is a flow (a deposit).
+        item = self.client.post("/api/sports/items", json={"card": BO_REF, "quantity": 2}).json()["item"]
+        self.assertEqual(self.fake.history[-1], {**self.fake.history[-1], "total_value": 2.58, "flow": 2.58, "kind": "add"})
+
+        # One more copy: another deposit.
+        self.client.patch(f"/api/sports/items/{item['id']}", json={"quantity": 3})
+        self.assertEqual((self.fake.history[-1]["flow"], self.fake.history[-1]["kind"]), (1.29, "quantity"))
+
+        # The refresh's price move is market movement, not a flow.
+        summary = cardsight.summarize(pricing_data(raw=[sale(1.50, 20)]))
+
+        async def new_prices(ids):
+            return {BO: summary}
+
+        with mock.patch.object(cardsight, "get_prices", new_prices):
+            self.client.post("/api/sports/refresh")
+        self.assertEqual(self.fake.history[-1], {**self.fake.history[-1], "total_value": 4.5, "flow": 0.0, "kind": "refresh"})
+
+        self.client.delete(f"/api/sports/items/{item['id']}")
+        self.assertEqual((self.fake.history[-1]["total_value"], self.fake.history[-1]["flow"]), (0.0, -4.5))
+
+
+class SportsInPortfolioTests(unittest.TestCase):
+    def test_sports_total_counts_in_value_chart_and_attribution(self):
+        start = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
+        rows = [
+            {"recorded_at": start.isoformat(), "total_value": 100, "flow": 100, "kind": "add"},
+            # Refresh: +20 market and a $10 card priced for the first time.
+            {"recorded_at": (start + timedelta(days=1)).isoformat(), "total_value": 130, "flow": 10, "kind": "refresh"},
+            {"recorded_at": (start + timedelta(days=2)).isoformat(), "total_value": 160, "flow": 30, "kind": "add"},
+        ]
+        result = main.build_dashboard([], [], {}, {}, now=start + timedelta(days=3), sports_history=rows)
+
+        self.assertEqual(result["current_total_value"], 160)
+        everything = result["ranges"]["ALL"]
+        self.assertEqual(everything["change"], 20)
+        self.assertEqual(everything["change_pct"], 20.0)
+        attribution = everything["attribution"]
+        self.assertEqual(
+            (attribution["market_change"], attribution["acquisitions"], attribution["total_change"]),
+            (20, 40, 60),
+        )
+        self.assertEqual(attribution["contributors"][0]["kind"], "sports")
+        self.assertEqual(attribution["contributors"][0]["market_change"], 20)
+
+    def test_history_is_brought_up_to_the_current_total_as_a_flow(self):
+        now = datetime(2026, 11, 29, tzinfo=timezone.utc)
+        self.assertEqual(sports.history_rows([], 0.0, now), [])
+        rows = sports.history_rows([{"recorded_at": "2026-11-28T00:00:00+00:00", "total_value": 50, "flow": 50}], 75.0, now)
+        self.assertEqual((rows[-1]["total_value"], rows[-1]["flow"]), (75.0, 25.0))
 
 
 if __name__ == "__main__":

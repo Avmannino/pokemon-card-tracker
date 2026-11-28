@@ -257,6 +257,62 @@ class Lot:
             yield when, -qty * (self.price(when) or 0.0)
 
 
+class TotalHistory:
+    """A part of the collection known only by its total over time: the
+    sports cards (CardSight's terms rule out keeping their prices, so only
+    the sports collection's total is recorded, after each change - see
+    sports.record_value).
+
+    Each row's flow is the part of its change that came from cards added,
+    removed or revalued by you, booked like a lot's addition or removal; the
+    rest is market movement. At a row's moment the market part applies
+    first, then the flow, like price observations before additions."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.times: list[datetime] = []
+        self.after: list[float] = []
+        self.flow_at: list[float] = []
+
+        for row in sorted(rows, key=lambda row: (parse_ts(row["recorded_at"]), row.get("id") or 0)):
+            moment = parse_ts(row["recorded_at"])
+            total = float(row["total_value"])
+            flow = float(row.get("flow") or 0)
+
+            if self.times and self.times[-1] == moment:
+                self.after[-1] = total
+                self.flow_at[-1] += flow
+            else:
+                self.times.append(moment)
+                self.after.append(total)
+                self.flow_at.append(flow)
+
+        self.first = self.times[0] if self.times else None
+
+    def value(self, moment: datetime, include_events_at_moment: bool = True) -> float:
+        index = bisect.bisect_right(self.times, moment) - 1
+        if index < 0:
+            return 0.0
+        if self.times[index] == moment and not include_events_at_moment:
+            return self.after[index] - self.flow_at[index]
+        return self.after[index]
+
+    def flows(self):
+        for moment, flow in zip(self.times, self.flow_at):
+            if abs(flow) >= 0.005:
+                yield moment, flow
+
+
+SPORTS_SUMMARY = {
+    "id": "sports",
+    "name": "Sports cards",
+    "card_number": None,
+    "set_name": "Your whole sports collection",
+    "variant": None,
+    "rarity": None,
+    "image_url": None,
+}
+
+
 # Cards listed under Biggest Portfolio Contributors, per range.
 CONTRIBUTOR_COUNT = 10
 
@@ -270,22 +326,30 @@ def _card_summary(card: dict[str, Any]) -> dict[str, Any]:
 
 
 class Performance:
-    """Raw value, flows and adjusted value for a set of lots."""
+    """Raw value, flows and adjusted value for a set of lots, plus the
+    sports collection's total (`totals`) when given."""
 
-    def __init__(self, lots: list[Lot]) -> None:
+    def __init__(self, lots: list[Lot], totals: TotalHistory | None = None) -> None:
         self.lots = lots
+        self.totals = totals if totals is not None and totals.first is not None else None
 
         flows: dict[datetime, float] = defaultdict(float)
         for lot in lots:
             for moment, amount in lot.flows():
                 flows[moment] += amount
+        if self.totals:
+            for moment, amount in self.totals.flows():
+                flows[moment] += amount
 
         self.flow_times = sorted(flows)
         self.flow_amounts = [flows[moment] for moment in self.flow_times]
-        self.first_added = min((lot.added_at for lot in lots), default=None)
+        self.first_added = min(
+            [lot.added_at for lot in lots] + ([self.totals.first] if self.totals else []),
+            default=None,
+        )
 
     def raw_value(self, moment: datetime, include_events_at_moment: bool = True) -> float:
-        total = 0.0
+        total = self.totals.value(moment, include_events_at_moment) if self.totals else 0.0
 
         for lot in self.lots:
             held = lot.held(moment, include_events_at_moment)
@@ -363,6 +427,28 @@ class Performance:
             )
             entry["quantity"] += held_at_end
             entry["market_change"] += end_value - start_value - lot_added - lot_removed
+
+        if self.totals:
+            # The sports collection is one entry: only its total is known.
+            sports_added = sports_removed = 0.0
+            for moment, amount in self.totals.flows():
+                if start < moment <= end:
+                    if amount >= 0:
+                        sports_added += amount
+                    else:
+                        sports_removed += amount
+            start_value = self.totals.value(start)
+            end_value = self.totals.value(end)
+            added += sports_added
+            removed += sports_removed
+            if start_value or end_value or sports_added or sports_removed:
+                by_card[("sports", "SPORTS")] = {
+                    "card": dict(SPORTS_SUMMARY),
+                    "grade": "SPORTS",
+                    "kind": "sports",
+                    "quantity": 0,
+                    "market_change": end_value - start_value - sports_added - sports_removed,
+                }
 
         starting = self.raw_value(start)
         ending = self.raw_value(end)
@@ -804,12 +890,15 @@ def build_dashboard(
     now: datetime | None = None,
     events_recorded: bool = True,
     last_syncs: list[dict[str, Any]] | None = None,
+    sports_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """`last_syncs`: the latest finished sync of each kind, as
-    price_sync.last_finished_syncs() returns them."""
+    price_sync.last_finished_syncs() returns them. `sports_history`: the
+    sports collection's totals over time (sports.history_rows), counted in
+    the value, chart and performance numbers."""
     now = now or datetime.now(timezone.utc)
     lots, skipped = build_lots(items, events, cards, snapshots_by_card)
-    performance = Performance(lots)
+    performance = Performance(lots, TotalHistory(sports_history or []))
 
     ranges: dict[str, Any] = {}
     if performance.first_added is not None:

@@ -6,6 +6,7 @@ terms don't allow keeping price history, so sports cards have current
 values only.
 """
 
+import logging
 import math
 from datetime import datetime, timezone
 from typing import Any
@@ -13,6 +14,8 @@ from typing import Any
 from .. import db
 from . import cardsight, grading, state_store
 
+
+logger = logging.getLogger("sports")
 
 OWNED_GRADES = ("RAW", "PSA_7", "PSA_8", "PSA_9", "PSA_10")
 REFRESH_KEY = "sports_refresh"
@@ -183,6 +186,68 @@ def last_refresh() -> dict[str, Any] | None:
     return state_store.get(REFRESH_KEY)
 
 
+# --- The sports total in the portfolio chart ---
+#
+# CardSight's terms rule out keeping its card prices over time, so the
+# chart gets only the sports collection's total: a row in
+# sports_value_history after every change. Each row's flow is the part of
+# the change you made (cards added, removed, regraded or given your own
+# value, or priced for the first time); the chart books it like a deposit or
+# withdrawal, so only price moves found by a refresh count as gains or
+# losses.
+
+
+def collection_total(items: list[dict[str, Any]], cards: dict[str, dict[str, Any]]) -> float:
+    total = 0.0
+    for item in items:
+        card = cards.get(item["sports_card_id"])
+        if card:
+            value, _ = owned_value(item, card)
+            if value is not None:
+                total += value * int(item.get("quantity") or 1)
+    return round(total, 2)
+
+
+def current_total() -> float:
+    items = db.get_sports_items()
+    return collection_total(items, db.get_sports_cards({item["sports_card_id"] for item in items}))
+
+
+def record_value(kind: str, total: float | None = None, market_change: float = 0.0) -> None:
+    """Records the sports total after a change. Everything since the last
+    row except `market_change` is a flow. Never fails the change it follows
+    (e.g. before the history table exists)."""
+    try:
+        total = current_total() if total is None else total
+        last = db.get_last_sports_value()
+        previous = float(last["total_value"]) if last else 0.0
+        if last and abs(total - previous) < 0.005 and kind != "refresh":
+            return
+        db.insert_sports_value(total, total - previous - market_change, kind)
+    except Exception:
+        logger.warning("Couldn't record the sports total (%s)", kind, exc_info=True)
+
+
+def history_rows(
+    history: list[dict[str, Any]], current: float, now: datetime
+) -> list[dict[str, Any]]:
+    """The recorded totals, plus a row bringing them up to the current total
+    when they differ (sports cards added before the history existed, or a
+    change that couldn't be recorded) - booked as a flow, never a gain."""
+    previous = float(history[-1]["total_value"]) if history else 0.0
+    if abs(current - previous) < 0.005:
+        return history
+    return [
+        *history,
+        {
+            "recorded_at": now.isoformat(),
+            "total_value": current,
+            "flow": round(current - previous, 2),
+            "kind": "reconcile",
+        },
+    ]
+
+
 def refresh_changes(
     items: list[dict[str, Any]],
     cards: dict[str, dict[str, Any]],
@@ -253,6 +318,19 @@ async def refresh_prices(reason: str = "manual", now: datetime | None = None) ->
         changes = refresh_changes(items, cards_by_id, summaries)
         db.save_sports_card_prices(
             [(card, summaries[card["cardsight_id"]]) for card in cards if card["cardsight_id"] in summaries]
+        )
+
+        # The chart's sports total: price moves are market movement; cards
+        # priced for the first time (or no longer priced) are flows.
+        repriced = {
+            card_id: {**card, "prices": summaries[card["cardsight_id"]]}
+            for card_id, card in cards_by_id.items()
+            if card["cardsight_id"] in summaries
+        }
+        record_value(
+            "refresh",
+            total=collection_total(items, {**cards_by_id, **repriced}),
+            market_change=sum(change["change"] for change in changes),
         )
 
         record = {

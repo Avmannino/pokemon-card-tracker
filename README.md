@@ -456,13 +456,20 @@ The **Sports** section (below the collection) tracks sports cards with
 [CardSight AI](https://cardsight.ai) (free plan: 750 calls a month). Values
 are the median of each grade's most recent eBay auction sales (up to 10)
 from the past year. Each raw card also gets the same grading score as the
-Pokémon cards. Sports cards have their own total and are not part of the
-performance chart, because CardSight's terms don't allow keeping price
-history. Each card's prices are a cache that the daily refresh replaces.
+Pokémon cards. Each card's prices are a cache that the daily refresh
+replaces, because CardSight's terms don't allow keeping price history.
+Sports cards still count in the known collection value, the chart and the
+performance numbers. For those, only the sports collection's total is
+recorded after each change (`sports_value_history`), never card prices.
+Cards added, removed, regraded or given your own value count like
+deposits and withdrawals. Price moves found by a refresh count as gains or
+losses, and Biggest Portfolio Contributors lists them as one "Sports
+cards" entry.
 
 Setup:
 
-1. Run `supabase/migrations/2026-11-28_sports_cards.sql` in the Supabase SQL editor.
+1. Run `supabase/migrations/2026-11-28_sports_cards.sql` and
+   `supabase/migrations/2026-11-29_sports_value_history.sql` in the Supabase SQL editor.
 2. Add `CARDSIGHT_API_KEY` to `backend/.env` and to the Render service's environment.
 3. The GitHub Action `.github/workflows/sports-prices.yml` reprices every
    sports card daily at 9:17 ET. That's one call per 100 cards, so about 30 to 60 calls a month.

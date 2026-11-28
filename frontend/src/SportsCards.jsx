@@ -257,7 +257,7 @@ function emptyAdd(card = null) {
   };
 }
 
-export default function SportsCards() {
+export default function SportsCards({ onChange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -288,7 +288,9 @@ export default function SportsCards() {
   const [editForm, setEditForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  async function load({ quiet = false } = {}) {
+  // `changed`: something was added, edited, removed or repriced, so the
+  // page's totals and chart (which include sports) reload too.
+  async function load({ quiet = false, changed = false } = {}) {
     if (!quiet) setLoading(true);
     try {
       setData(await getSportsCollection());
@@ -298,6 +300,7 @@ export default function SportsCards() {
     } finally {
       setLoading(false);
     }
+    if (changed) onChange?.();
   }
 
   useEffect(() => {
@@ -381,7 +384,7 @@ export default function SportsCards() {
       setMessage(
         `Prices refreshed: ${result.priced} of ${result.cards} cards had sales (${result.calls} CardSight call${result.calls === 1 ? "" : "s"}).`
       );
-      await load({ quiet: true });
+      await load({ quiet: true, changed: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -394,7 +397,7 @@ export default function SportsCards() {
     setError("");
     try {
       await updateSportsCard(item.id, { quantity });
-      await load({ quiet: true });
+      await load({ quiet: true, changed: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -410,7 +413,7 @@ export default function SportsCards() {
     try {
       await deleteSportsCard(item.id);
       setMessage(`Removed ${cardName(item.card)}.`);
-      await load({ quiet: true });
+      await load({ quiet: true, changed: true });
     } catch (err) {
       setError(err.message);
     }
@@ -520,7 +523,7 @@ export default function SportsCards() {
         setError(`Added, but it couldn't be priced yet: ${response.price_error}`);
       }
       closeAdd();
-      await load({ quiet: true });
+      await load({ quiet: true, changed: true });
     } catch (err) {
       setModalError(err.message);
     } finally {
@@ -553,7 +556,7 @@ export default function SportsCards() {
       });
       setEditForm(null);
       setMessage("Saved.");
-      await load({ quiet: true });
+      await load({ quiet: true, changed: true });
     } catch (err) {
       setModalError(err.message);
     } finally {

@@ -196,6 +196,7 @@ async def add_sports_item(request: SportsAddRequest) -> dict[str, Any]:
         )
         merged = False
 
+    sports.record_value("add")
     return {"item": item, "merged": merged, "price_error": price_error}
 
 
@@ -219,7 +220,9 @@ def update_sports_item(item_id: str, request: SportsItemUpdate) -> dict[str, Any
     if not fields:
         raise HTTPException(status_code=400, detail="Nothing to change.")
 
-    return {"item": db.update_sports_item(item_id, fields)}
+    item = db.update_sports_item(item_id, fields)
+    sports.record_value("quantity" if set(fields) == {"quantity"} else "edit")
+    return {"item": item}
 
 
 @router.delete("/items/{item_id}")
@@ -234,6 +237,7 @@ def delete_sports_item(item_id: str) -> dict[str, Any]:
     if not db.sports_card_in_use(item["sports_card_id"]):
         db.delete_sports_card(item["sports_card_id"])
 
+    sports.record_value("remove")
     return {"removed": True}
 
 

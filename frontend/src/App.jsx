@@ -538,8 +538,12 @@ function App() {
     return () => clearTimeout(timer);
   }, [syncReadyAt, clock]);
 
+  // Pokemon and sports cards together.
   const ownedTotal = useMemo(
-    () => collection.summary?.known_market_total || 0,
+    () =>
+      collection.summary?.combined_total ??
+      collection.summary?.known_market_total ??
+      0,
     [collection]
   );
 
@@ -1692,10 +1696,7 @@ function App() {
 
             <strong>{money(ownedTotal)}</strong>
 
-            <small>
-              {collection.summary?.item_count || 0} collection entries ·
-              Small Hits {money(collection.summary?.small_hits_total || 0)}
-            </small>
+            <small>Pokémon and sports cards</small>
           </div>
 
           <button
@@ -1706,6 +1707,45 @@ function App() {
             Small Hits
           </button>
         </div>
+
+        <div className="portfolio-card portfolio-part">
+          <div className="portfolio-card-copy">
+            <span>Pokémon</span>
+
+            <strong>
+              {money(
+                collection.summary?.pokemon_total ??
+                  collection.summary?.known_market_total ??
+                  0
+              )}
+            </strong>
+
+            <small>
+              {collection.summary?.item_count || 0} entries · Small Hits{" "}
+              {money(collection.summary?.small_hits_total || 0)}
+            </small>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="portfolio-card portfolio-part sports-part"
+          onClick={() =>
+            document.getElementById("sports")?.scrollIntoView({ behavior: "smooth" })
+          }
+          title="Go to Sports"
+        >
+          <div className="portfolio-card-copy">
+            <span>Sports cards</span>
+
+            <strong>{money(collection.summary?.sports_total || 0)}</strong>
+
+            <small>
+              {collection.summary?.sports_card_count || 0}{" "}
+              {collection.summary?.sports_card_count === 1 ? "card" : "cards"}
+            </small>
+          </div>
+        </button>
       </section>
 
       <Dashboard
@@ -1928,7 +1968,8 @@ function App() {
           )}
       </section>
 
-      <SportsCards />
+      {/* Sports changes move the totals above and the chart. */}
+      <SportsCards onChange={() => loadCollection({ quiet: true })} />
 
       {smallHitsMounted && (
         <div
