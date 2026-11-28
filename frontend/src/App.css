@@ -4372,3 +4372,15 @@ button.portfolio-card {
 .sports-manual-link .text-button {
   font-size: 0.82rem;
 }
+
+.sports-manual-preview {
+  margin: -6px 0 14px;
+
+  color: #8b96aa;
+
+  font-size: 0.8rem;
+}
+
+.sports-manual-preview strong {
+  color: #f0f4ff;
+}

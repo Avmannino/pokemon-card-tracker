@@ -12,6 +12,7 @@ import {
   updateSportsCard,
 } from "./api";
 import { gradeLabel, money } from "./format";
+import { parseCardLine } from "./parseCardLine";
 
 // The Sports section: your sports cards priced by CardSight AI (eBay
 // auction sales from the past year), separate from the Pokemon collection.
@@ -246,12 +247,15 @@ function SportsLastSyncs({ refresh }) {
 // A card CardSight doesn't have, entered by hand; starts from what you
 // searched for.
 function emptyManual(search = emptySearch()) {
+  // A full card line pasted into the search fills every field, subset too.
+  const parsed = search.pasted ? parseCardLine(search.pasted) : {};
   return {
-    name: search.name.trim(),
-    year: search.year.trim(),
-    release_name: search.set.trim(),
-    set_name: "",
-    number: search.number.trim(),
+    paste: search.pasted || "",
+    name: parsed.name ?? search.name.trim(),
+    year: parsed.year ?? search.year.trim(),
+    release_name: parsed.release_name ?? search.set.trim(),
+    set_name: parsed.set_name ?? "",
+    number: parsed.number ?? search.number.trim(),
     league: "MLB",
     ownership_grade: "RAW",
     quantity: 1,
@@ -262,7 +266,32 @@ function emptyManual(search = emptySearch()) {
 }
 
 function emptySearch() {
-  return { name: "", year: "", number: "", set: "" };
+  return { name: "", year: "", number: "", set: "", pasted: "" };
+}
+
+// The parts of a pasted card line, as the hand-add form's fields; parts it
+// couldn't find are left empty.
+function manualFieldsFrom(text) {
+  const parsed = parseCardLine(text);
+  return {
+    name: parsed.name || "",
+    year: parsed.year || "",
+    release_name: parsed.release_name || "",
+    set_name: parsed.set_name || "",
+    number: parsed.number || "",
+  };
+}
+
+// How a hand-added card will read in the table.
+function manualPreview(form) {
+  const card = {
+    name: form.name.trim(),
+    number: form.number.trim().replace(/^#/, ""),
+    year: form.year.trim(),
+    release_name: form.release_name.trim(),
+    set_name: form.set_name.trim(),
+  };
+  return card.name ? { title: cardName(card), line: cardLine(card) } : null;
 }
 
 function emptyAdd(card = null) {
@@ -1000,6 +1029,29 @@ export default function SportsCards({ onChange }) {
             {manualForm ? (
               <form onSubmit={handleManualAdd}>
                 <label>
+                  Paste the full card (fills the fields below)
+                  <input
+                    value={manualForm.paste}
+                    onChange={(event) => {
+                      const text = event.target.value;
+                      setManualForm((current) => ({
+                        ...current,
+                        paste: text,
+                        ...(text.trim() ? manualFieldsFrom(text) : {}),
+                      }));
+                    }}
+                    placeholder="1984 Topps Nestlé Dream Team – Dave Winfield #6"
+                  />
+                </label>
+
+                {manualPreview(manualForm) && (
+                  <p className="sports-manual-preview">
+                    Shows as <strong>{manualPreview(manualForm).title}</strong>
+                    {manualPreview(manualForm).line ? ` · ${manualPreview(manualForm).line}` : ""}
+                  </p>
+                )}
+
+                <label>
                   Player or card name
                   <input
                     value={manualForm.name}
@@ -1140,8 +1192,25 @@ export default function SportsCards({ onChange }) {
                     Player
                     <input
                       value={search.name}
-                      onChange={(event) => setSearch((current) => ({ ...current, name: event.target.value }))}
-                      placeholder="Ken Griffey Jr."
+                      onChange={(event) =>
+                        setSearch((current) => ({ ...current, name: event.target.value, pasted: "" }))
+                      }
+                      onPaste={(event) => {
+                        // A full card line ("1991 Stadium Club - Ken Griffey Jr. #270")
+                        // fills the year, number and set too.
+                        const text = event.clipboardData.getData("text");
+                        const parsed = parseCardLine(text);
+                        if (!parsed.year && !parsed.number && !parsed.release_name) return;
+                        event.preventDefault();
+                        setSearch({
+                          name: parsed.name || parsed.release_name || text.trim(),
+                          year: parsed.year || "",
+                          number: parsed.number || "",
+                          set: parsed.name ? parsed.release_name || "" : "",
+                          pasted: text,
+                        });
+                      }}
+                      placeholder="Ken Griffey Jr. (or paste the full card)"
                       autoFocus
                     />
                   </label>
