@@ -183,6 +183,14 @@ export function addSportsCard(payload) {
   });
 }
 
+// A card CardSight doesn't have, with your own value.
+export function addSportsManualCard(payload) {
+  return request("/api/sports/manual-items", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // Only the fields given change; manual_value null clears your own value.
 export function updateSportsCard(itemId, fields) {
   return request(`/api/sports/items/${itemId}`, {

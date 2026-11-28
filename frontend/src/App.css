@@ -4364,3 +4364,11 @@ button.portfolio-card {
     font-size: 0.72rem;
   }
 }
+
+.sports-manual-link {
+  margin: -4px 0 14px;
+}
+
+.sports-manual-link .text-button {
+  font-size: 0.82rem;
+}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   addSportsCard,
+  addSportsManualCard,
   deleteSportsCard,
   getSportsCollection,
   getSportsPrices,
@@ -242,6 +243,24 @@ function SportsLastSyncs({ refresh }) {
   );
 }
 
+// A card CardSight doesn't have, entered by hand; starts from what you
+// searched for.
+function emptyManual(search = emptySearch()) {
+  return {
+    name: search.name.trim(),
+    year: search.year.trim(),
+    release_name: search.set.trim(),
+    set_name: "",
+    number: search.number.trim(),
+    league: "MLB",
+    ownership_grade: "RAW",
+    quantity: 1,
+    manual_value: "",
+    manual_source_url: "",
+    notes: "",
+  };
+}
+
 function emptySearch() {
   return { name: "", year: "", number: "", set: "" };
 }
@@ -286,6 +305,8 @@ export default function SportsCards({ onChange }) {
 
   const [detailsItem, setDetailsItem] = useState(null);
   const [editForm, setEditForm] = useState(null);
+  // Add Card's "add it by hand" form, when open.
+  const [manualForm, setManualForm] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // `changed`: something was added, edited, removed or repriced, so the
@@ -424,6 +445,7 @@ export default function SportsCards({ onChange }) {
     setSearch(emptySearch());
     setResults(null);
     setAddForm(emptyAdd());
+    setManualForm(null);
     setModalError("");
     setAddOpen(true);
   }
@@ -431,7 +453,44 @@ export default function SportsCards({ onChange }) {
   function closeAdd() {
     setAddOpen(false);
     setAddForm(emptyAdd());
+    setManualForm(null);
     setModalError("");
+  }
+
+  async function handleManualAdd(event) {
+    event.preventDefault();
+    if (!manualForm.name.trim()) {
+      setModalError("Enter the player or card name.");
+      return;
+    }
+    if (manualForm.manual_value === "") {
+      setModalError("Enter what the card is worth (CardSight has no sales for it).");
+      return;
+    }
+    setAdding(true);
+    setModalError("");
+    try {
+      await addSportsManualCard({
+        name: manualForm.name.trim(),
+        year: manualForm.year.trim() || null,
+        release_name: manualForm.release_name.trim() || null,
+        set_name: manualForm.set_name.trim() || null,
+        number: manualForm.number.trim() || null,
+        league: manualForm.league || null,
+        ownership_grade: manualForm.ownership_grade,
+        quantity: Number(manualForm.quantity) || 1,
+        manual_value: Number(manualForm.manual_value),
+        manual_source_url: manualForm.manual_source_url.trim() || null,
+        notes: manualForm.notes.trim() || null,
+      });
+      setMessage(`Added ${manualForm.name.trim()} to Sports.`);
+      closeAdd();
+      await load({ quiet: true, changed: true });
+    } catch (err) {
+      setModalError(err.message);
+    } finally {
+      setAdding(false);
+    }
   }
 
   async function handleSearch(event) {
@@ -538,12 +597,27 @@ export default function SportsCards({ onChange }) {
       manual_value: item.manual_value ?? "",
       manual_source_url: item.manual_source_url || "",
       notes: item.notes || "",
+      // A hand-added card's details can be corrected.
+      card: item.card.manual
+        ? {
+            name: item.card.name || "",
+            year: item.card.year || "",
+            release_name: item.card.release_name || "",
+            set_name: item.card.set_name || "",
+            number: item.card.number || "",
+            league: item.card.league || "",
+          }
+        : null,
     });
     setModalError("");
   }
 
   async function handleEdit(event, clearValue = false) {
     event.preventDefault();
+    if (editForm.card && (editForm.manual_value === "" || !editForm.card.name.trim())) {
+      setModalError("A card you added by hand needs a name and your own value.");
+      return;
+    }
     setSavingEdit(true);
     setModalError("");
     try {
@@ -553,6 +627,18 @@ export default function SportsCards({ onChange }) {
           clearValue || editForm.manual_value === "" ? null : Number(editForm.manual_value),
         manual_source_url: clearValue ? null : editForm.manual_source_url.trim() || null,
         notes: editForm.notes.trim() || null,
+        ...(editForm.card
+          ? {
+              card: {
+                name: editForm.card.name.trim(),
+                year: editForm.card.year.trim() || null,
+                release_name: editForm.card.release_name.trim() || null,
+                set_name: editForm.card.set_name.trim() || null,
+                number: editForm.card.number.trim() || null,
+                league: editForm.card.league || null,
+              },
+            }
+          : {}),
       });
       setEditForm(null);
       setMessage("Saved.");
@@ -854,7 +940,9 @@ export default function SportsCards({ onChange }) {
                             )}
                           </div>
                         ) : (
-                          <span className="grading-unavailable">Already graded</span>
+                          <span className="grading-unavailable">
+                            {item.card.manual ? "Not in CardSight" : "Already graded"}
+                          </span>
                         )}
                       </td>
 
@@ -891,11 +979,15 @@ export default function SportsCards({ onChange }) {
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">ADD TO SPORTS</p>
-                <h2>{selected ? cardName(selected) : "Find a sports card"}</h2>
+                <h2>
+                  {manualForm ? "Add a card by hand" : selected ? cardName(selected) : "Find a sports card"}
+                </h2>
                 <span>
-                  {selected
-                    ? `${cardLine(selected)}${selected.league ? ` · ${leagueName(selected.league)}` : ""}`
-                    : "Search by player, then narrow by year, card number or set. Each search uses 1 CardSight call."}
+                  {manualForm
+                    ? "For cards CardSight doesn't have. Its value is the one you enter, and it isn't refreshed."
+                    : selected
+                      ? `${cardLine(selected)}${selected.league ? ` · ${leagueName(selected.league)}` : ""}`
+                      : "Search by player, then narrow by year, card number or set. Each search uses 1 CardSight call."}
                 </span>
               </div>
               <button type="button" className="close-button" aria-label="Close" onClick={closeAdd}>
@@ -905,7 +997,143 @@ export default function SportsCards({ onChange }) {
 
             {modalError && <div className="status error">{modalError}</div>}
 
-            {!selected ? (
+            {manualForm ? (
+              <form onSubmit={handleManualAdd}>
+                <label>
+                  Player or card name
+                  <input
+                    value={manualForm.name}
+                    onChange={(event) => setManualForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Derek Jeter"
+                    autoFocus
+                  />
+                </label>
+
+                <div className="grade-input-grid">
+                  <label>
+                    Year
+                    <input
+                      inputMode="numeric"
+                      maxLength={10}
+                      value={manualForm.year}
+                      onChange={(event) => setManualForm((current) => ({ ...current, year: event.target.value }))}
+                      placeholder="2003"
+                    />
+                  </label>
+                  <label>
+                    Card #
+                    <input
+                      value={manualForm.number}
+                      onChange={(event) => setManualForm((current) => ({ ...current, number: event.target.value }))}
+                      placeholder="12"
+                    />
+                  </label>
+                  <label>
+                    League
+                    <select
+                      value={manualForm.league}
+                      onChange={(event) => setManualForm((current) => ({ ...current, league: event.target.value }))}
+                    >
+                      <option value="MLB">Baseball</option>
+                      <option value="NFL">Football</option>
+                      <option value="NBA">Basketball</option>
+                      <option value="NHL">Hockey</option>
+                      <option value="">Other</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label>
+                  Set
+                  <input
+                    value={manualForm.release_name}
+                    onChange={(event) =>
+                      setManualForm((current) => ({ ...current, release_name: event.target.value }))
+                    }
+                    placeholder="Upper Deck Yankees 100th Anniversary"
+                  />
+                </label>
+
+                <label>
+                  Subset or insert (optional)
+                  <input
+                    value={manualForm.set_name}
+                    onChange={(event) => setManualForm((current) => ({ ...current, set_name: event.target.value }))}
+                    placeholder="World Series Highlights"
+                  />
+                </label>
+
+                <div className="grade-input-grid">
+                  <label>
+                    What do you own?
+                    <select
+                      value={manualForm.ownership_grade}
+                      onChange={(event) =>
+                        setManualForm((current) => ({ ...current, ownership_grade: event.target.value }))
+                      }
+                    >
+                      {OWNED_GRADES.map((grade) => (
+                        <option key={grade} value={grade}>
+                          {gradeLabel(grade)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Quantity
+                    <input
+                      type="number"
+                      min="1"
+                      max="999"
+                      value={manualForm.quantity}
+                      onChange={(event) => setManualForm((current) => ({ ...current, quantity: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Your value per card
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={manualForm.manual_value}
+                      onChange={(event) =>
+                        setManualForm((current) => ({ ...current, manual_value: event.target.value }))
+                      }
+                      placeholder="0.00"
+                    />
+                  </label>
+                </div>
+
+                <label>
+                  Where that value is from (optional)
+                  <input
+                    type="url"
+                    value={manualForm.manual_source_url}
+                    onChange={(event) =>
+                      setManualForm((current) => ({ ...current, manual_source_url: event.target.value }))
+                    }
+                    placeholder="https://www.sportscardspro.com/game/..."
+                  />
+                </label>
+
+                <label>
+                  Notes (optional)
+                  <textarea
+                    value={manualForm.notes}
+                    onChange={(event) => setManualForm((current) => ({ ...current, notes: event.target.value }))}
+                  />
+                </label>
+
+                <div className="modal-actions">
+                  <button type="button" className="secondary-button" onClick={() => setManualForm(null)}>
+                    ← Back to search
+                  </button>
+                  <button type="submit" disabled={adding}>
+                    {adding ? "Adding…" : "Add to Sports"}
+                  </button>
+                </div>
+              </form>
+            ) : !selected ? (
               <>
                 <form className="sports-search-form" onSubmit={handleSearch}>
                   <label className="sports-search-name">
@@ -947,6 +1175,19 @@ export default function SportsCards({ onChange }) {
                     {searching ? "Searching…" : "Search"}
                   </button>
                 </form>
+
+                <div className="sports-manual-link">
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      setModalError("");
+                      setManualForm(emptyManual(search));
+                    }}
+                  >
+                    Can't find your card? Add it by hand
+                  </button>
+                </div>
 
                 {results && results.length === 0 && (
                   <div className="empty-state">
@@ -1142,6 +1383,78 @@ export default function SportsCards({ onChange }) {
 
             {modalError && <div className="status error">{modalError}</div>}
 
+            {editForm.card && (
+              <>
+                <label>
+                  Player or card name
+                  <input
+                    value={editForm.card.name}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, card: { ...current.card, name: event.target.value } }))
+                    }
+                    placeholder="Derek Jeter"
+                  />
+                </label>
+                <div className="grade-input-grid">
+                  <label>
+                  Year
+                  <input
+                    value={editForm.card.year}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, card: { ...current.card, year: event.target.value } }))
+                    }
+                    placeholder="2003"
+                  />
+                </label>
+                <label>
+                  Card #
+                  <input
+                    value={editForm.card.number}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, card: { ...current.card, number: event.target.value } }))
+                    }
+                    placeholder="12"
+                  />
+                </label>
+                <label>
+                  League
+                  <select
+                    value={editForm.card.league}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, card: { ...current.card, league: event.target.value } }))
+                    }
+                  >
+                    <option value="MLB">Baseball</option>
+                    <option value="NFL">Football</option>
+                    <option value="NBA">Basketball</option>
+                    <option value="NHL">Hockey</option>
+                    <option value="">Other</option>
+                  </select>
+                </label>
+                </div>
+                <label>
+                  Set
+                  <input
+                    value={editForm.card.release_name}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, card: { ...current.card, release_name: event.target.value } }))
+                    }
+                    placeholder="Upper Deck Yankees 100th Anniversary"
+                  />
+                </label>
+                <label>
+                  Subset or insert (optional)
+                  <input
+                    value={editForm.card.set_name}
+                    onChange={(event) =>
+                      setEditForm((current) => ({ ...current, card: { ...current.card, set_name: event.target.value } }))
+                    }
+                    placeholder="World Series Highlights"
+                  />
+                </label>
+              </>
+            )}
+
             <label>
               What do you own?
               <select
@@ -1157,7 +1470,7 @@ export default function SportsCards({ onChange }) {
             </label>
 
             <label>
-              Your value per card (leave empty to use recent sales)
+              {editForm.card ? "Your value per card" : "Your value per card (leave empty to use recent sales)"}
               <input
                 type="number"
                 min="0"
@@ -1191,7 +1504,7 @@ export default function SportsCards({ onChange }) {
             </label>
 
             <div className="modal-actions">
-              {editForm.item.manual_value !== null && editForm.item.manual_value !== undefined && (
+              {!editForm.card && editForm.item.manual_value !== null && editForm.item.manual_value !== undefined && (
                 <button
                   type="button"
                   className="secondary-button"
@@ -1232,17 +1545,35 @@ export default function SportsCards({ onChange }) {
             </div>
 
             <div className="sports-check">
-              <img
-                src={photo(detailsItem.card, 1600) || sportsImageUrl(detailsItem.card.cardsight_id)}
-                alt={cardName(detailsItem.card)}
-                referrerPolicy="no-referrer"
-                className="sports-check-photo"
-                onError={(event) => {
-                  event.currentTarget.style.display = "none";
-                }}
-              />
+              {!detailsItem.card.manual && (
+                <img
+                  src={photo(detailsItem.card, 1600) || sportsImageUrl(detailsItem.card.cardsight_id)}
+                  alt={cardName(detailsItem.card)}
+                  referrerPolicy="no-referrer"
+                  className="sports-check-photo"
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
+              )}
               <div className="sports-check-body">
-                <GradeTable grades={detailsItem.prices} owned={detailsItem.ownership_grade} />
+                {detailsItem.card.manual ? (
+                  <p className="modal-tip">
+                    Added by hand: CardSight doesn't have this card. It's valued at{" "}
+                    <strong>{money(detailsItem.value_each)}</strong> each, the value you set
+                    {detailsItem.manual_source_url ? (
+                      <>
+                        {" "}from{" "}
+                        <a href={detailsItem.manual_source_url} target="_blank" rel="noreferrer">
+                          this source
+                        </a>
+                      </>
+                    ) : null}
+                    . Change it with Edit.
+                  </p>
+                ) : (
+                  <GradeTable grades={detailsItem.prices} owned={detailsItem.ownership_grade} />
+                )}
 
                 {detailsItem.grading && (
                   <div className="sports-check-grading">
@@ -1269,9 +1600,11 @@ export default function SportsCards({ onChange }) {
 
                 {detailsItem.notes && <p className="modal-tip">{detailsItem.notes}</p>}
 
-                <small className="sports-check-note">
-                  Prices from CardSight AI, refreshed {refreshedText(detailsItem.priced_at)}.
-                </small>
+                {!detailsItem.card.manual && (
+                  <small className="sports-check-note">
+                    Prices from CardSight AI, refreshed {refreshedText(detailsItem.priced_at)}.
+                  </small>
+                )}
               </div>
             </div>
           </div>

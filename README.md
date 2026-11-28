@@ -480,6 +480,13 @@ Adding it after that is free. **Refresh Prices** is 1 call per 100 cards. The ap
 counts its own calls and stops at 735 a month. CardSight's dashboard has the
 true count. For a card with no sales, use **Edit → Your value**.
 
+Some sets aren't in CardSight's catalog (for example 2003 Upper Deck
+Yankees 100th Anniversary is listed with no cards). Use **Can't find your
+card? Add it by hand** in the Add Card window. A card added by hand has
+your own value (and optionally a link to where it's from, e.g.
+SportsCardsPro). It counts in every total. It's never sent to CardSight, so
+its value only changes when you edit it.
+
 # 11. Current project structure
 
 ```text

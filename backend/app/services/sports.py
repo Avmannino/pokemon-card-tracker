@@ -65,11 +65,23 @@ def _grade_part(grade: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+# Cards CardSight doesn't have (e.g. 2003 Upper Deck Yankees 100th
+# Anniversary, listed with no cards) are added by hand: their id starts with
+# this instead of being a CardSight id, they're never sent to CardSight, and
+# their value is the one you set.
+MANUAL_PREFIX = "manual-"
+
+
+def is_manual_card(card: dict[str, Any]) -> bool:
+    return str(card.get("cardsight_id") or "").startswith(MANUAL_PREFIX)
+
+
 def card_view(card: dict[str, Any]) -> dict[str, Any]:
     prices = card.get("prices") or {}
     attributes = card.get("attributes") or []
     return {
         "id": card.get("id"),
+        "manual": is_manual_card(card),
         "cardsight_id": card["cardsight_id"],
         "name": card.get("name"),
         "number": card.get("number"),
@@ -143,7 +155,8 @@ def build_collection(
 
         quantity = int(item.get("quantity") or 1)
         value_each, source = owned_value(item, card)
-        is_raw = item["ownership_grade"] == "RAW"
+        # A hand-added card has no sales to judge grading by.
+        is_raw = item["ownership_grade"] == "RAW" and not is_manual_card(card)
 
         rows.append(
             {
@@ -311,7 +324,7 @@ async def refresh_prices(reason: str = "manual", now: datetime | None = None) ->
     try:
         items = db.get_sports_items()
         cards_by_id = db.get_sports_cards({item["sports_card_id"] for item in items})
-        cards = list(cards_by_id.values())
+        cards = [card for card in cards_by_id.values() if not is_manual_card(card)]
         summaries = await cardsight.get_prices([card["cardsight_id"] for card in cards])
         # Compared before the old prices are overwritten. Only this refresh's
         # changes are kept (replaced by the next one), never a history.

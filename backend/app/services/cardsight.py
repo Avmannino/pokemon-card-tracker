@@ -157,9 +157,15 @@ def _words(text: str | None) -> list[str]:
     return re.findall(r"[a-z0-9]+", (text or "").lower())
 
 
+LEAGUES = ("MLB", "NFL", "NBA", "NHL")
+
+
 def league(attributes: list[str] | None) -> str | None:
-    """The league from a team attribute, e.g. "MLB-KCR" -> "MLB"."""
+    """The league from a team attribute, e.g. "MLB-KCR" -> "MLB", or a bare
+    league (a card you added by hand)."""
     for attribute in attributes or []:
+        if str(attribute) in LEAGUES:
+            return str(attribute)
         match = re.fullmatch(r"([A-Z]{2,5})-[A-Z0-9]{2,5}", str(attribute))
         if match:
             return match.group(1)

@@ -83,6 +83,31 @@ class SportsAddRequest(BaseModel):
     manual_source_url: str | None = Field(default=None, max_length=500)
 
 
+class SportsManualAddRequest(BaseModel):
+    # A card CardSight doesn't have, entered by hand with your own value.
+    name: str = Field(min_length=1, max_length=200)
+    year: str | None = Field(default=None, max_length=10)
+    release_name: str | None = Field(default=None, max_length=200)
+    set_name: str | None = Field(default=None, max_length=200)
+    number: str | None = Field(default=None, max_length=40)
+    league: Literal["MLB", "NFL", "NBA", "NHL"] | None = None
+    quantity: int = Field(default=1, ge=1, le=999)
+    ownership_grade: SportsGrade = "RAW"
+    manual_value: float = Field(ge=0)
+    manual_source_url: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class SportsCardDetails(BaseModel):
+    # A hand-added card's details (CardSight cards keep CardSight's).
+    name: str = Field(min_length=1, max_length=200)
+    year: str | None = Field(default=None, max_length=10)
+    release_name: str | None = Field(default=None, max_length=200)
+    set_name: str | None = Field(default=None, max_length=200)
+    number: str | None = Field(default=None, max_length=40)
+    league: Literal["MLB", "NFL", "NBA", "NHL"] | None = None
+
+
 class SportsItemUpdate(BaseModel):
     # Only the fields sent are changed; manual_value null clears your value.
     quantity: int | None = Field(default=None, ge=1, le=999)
@@ -90,6 +115,7 @@ class SportsItemUpdate(BaseModel):
     manual_value: float | None = Field(default=None, ge=0)
     manual_source_url: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=2000)
+    card: SportsCardDetails | None = None
 
 
 class SportsPricesRequest(BaseModel):

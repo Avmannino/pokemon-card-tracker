@@ -266,6 +266,9 @@ class FakeSportsDB:
     def sports_card_in_use(self, card_id):
         return any(item["sports_card_id"] == card_id for item in self.items.values())
 
+    def update_sports_card_details(self, card_id, details):
+        self.cards[card_id].update(details)
+
     def get_last_sports_value(self):
         return self.history[-1] if self.history else None
 
@@ -312,7 +315,7 @@ class SportsApiTests(unittest.TestCase):
             "get_sports_cards_by_cardsight_ids", "delete_sports_card",
             "get_sports_items", "get_sports_item", "add_sports_item", "update_sports_item",
             "delete_sports_item", "sports_card_in_use", "get_last_sports_value",
-            "insert_sports_value", "get_sports_value_history",
+            "insert_sports_value", "get_sports_value_history", "update_sports_card_details",
         ):
             patches.append(mock.patch.object(db, name, getattr(self.fake, name)))
         for patcher in patches:
@@ -449,6 +452,48 @@ class SportsApiTests(unittest.TestCase):
 
         self.client.delete(f"/api/sports/items/{item['id']}")
         self.assertEqual((self.fake.history[-1]["total_value"], self.fake.history[-1]["flow"]), (0.0, -4.5))
+
+
+    def test_cards_added_by_hand_use_your_value_and_never_go_to_cardsight(self):
+        self.client.post("/api/sports/items", json={"card": BO_REF})
+        response = self.client.post(
+            "/api/sports/manual-items",
+            json={
+                "name": "Derek Jeter", "year": "2003", "release_name": "Upper Deck Yankees 100th Anniversary",
+                "number": "#12", "league": "MLB", "quantity": 2, "manual_value": 4.5,
+                "manual_source_url": "https://www.sportscardspro.com/game/x",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["item"]
+
+        collection = self.client.get("/api/sports/collection").json()
+        row = next(row for row in collection["items"] if row["id"] == item["id"])
+        self.assertTrue(row["card"]["manual"])
+        self.assertEqual((row["card"]["number"], row["card"]["league"]), ("12", "MLB"))
+        self.assertEqual((row["value_total"], row["value_source"]), (9.0, "manual"))
+        self.assertIsNone(row["grading"])
+        self.assertEqual(self.fake.history[-1]["flow"], 9.0)
+
+        self.pricing_calls.clear()
+        self.client.post("/api/sports/refresh")
+        self.assertEqual(self.pricing_calls, [[BO]])
+
+        # Its details can be fixed; its value can be changed but not removed.
+        response = self.client.patch(
+            f"/api/sports/items/{item['id']}",
+            json={"card": {"name": "Derek Jeter", "year": "2003", "release_name": "Upper Deck Yankees 100th Anniversary", "number": "13"}},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.fake.cards[item["sports_card_id"]]["number"], "13")
+        self.assertEqual(
+            self.client.patch(f"/api/sports/items/{item['id']}", json={"manual_value": None}).status_code, 400
+        )
+
+        bo = next(row for row in self.fake.items.values() if row["id"] != item["id"])
+        self.assertEqual(
+            self.client.patch(f"/api/sports/items/{bo['id']}", json={"card": {"name": "Bo"}}).status_code, 400
+        )
 
 
 class SportsInPortfolioTests(unittest.TestCase):

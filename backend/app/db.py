@@ -489,6 +489,16 @@ def save_sports_card(card: dict[str, Any], prices: dict[str, Any] | None = None)
     return response.data[0]
 
 
+def update_sports_card_details(card_id: str, details: dict[str, Any]) -> None:
+    """A hand-added card's name, year, set, number and league."""
+    _sports(
+        lambda: _client().table("sports_cards")
+        .update({**details, "updated_at": utc_now_iso()})
+        .eq("id", card_id)
+        .execute()
+    )
+
+
 def save_sports_card_prices(updates: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
     """Replaces the cached prices of many cards: (saved row, summary)."""
     payload = [_sports_card_payload(card, prices) for card, prices in updates]

@@ -7,6 +7,7 @@ calls for the same search, card or image.
 """
 
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,7 +15,12 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from . import db
 from .config import settings
-from .schemas import SportsAddRequest, SportsItemUpdate, SportsPricesRequest
+from .schemas import (
+    SportsAddRequest,
+    SportsItemUpdate,
+    SportsManualAddRequest,
+    SportsPricesRequest,
+)
 from .services import cardsight, grading, sports
 
 
@@ -200,27 +206,87 @@ async def add_sports_item(request: SportsAddRequest) -> dict[str, Any]:
     return {"item": item, "merged": merged, "price_error": price_error}
 
 
+def _clean(text: str | None) -> str | None:
+    return (text or "").strip() or None
+
+
+@router.post("/manual-items")
+def add_manual_sports_item(request: SportsManualAddRequest) -> dict[str, Any]:
+    """Adds a card CardSight doesn't have, with your own value. Never sent to
+    CardSight; its value changes only when you edit it."""
+    card = db.save_sports_card(
+        {
+            "cardsight_id": f"{sports.MANUAL_PREFIX}{uuid.uuid4().hex}",
+            "name": request.name.strip(),
+            "year": _clean(request.year),
+            "release_name": _clean(request.release_name),
+            "set_name": _clean(request.set_name),
+            "number": _clean((request.number or "").lstrip("#")),
+            "attributes": [request.league] if request.league else [],
+        }
+    )
+    item = db.add_sports_item(
+        sports_card_id=card["id"],
+        quantity=request.quantity,
+        ownership_grade=request.ownership_grade,
+        notes=_clean(request.notes),
+        manual_value=request.manual_value,
+        manual_source_url=_clean(request.manual_source_url),
+    )
+    sports.record_value("add")
+    return {"item": item}
+
+
 @router.patch("/items/{item_id}")
 def update_sports_item(item_id: str, request: SportsItemUpdate) -> dict[str, Any]:
-    if not db.get_sports_item(item_id):
+    item = db.get_sports_item(item_id)
+    if not item:
         raise HTTPException(status_code=404, detail="Card not found in your sports collection.")
 
+    manual_card = sports.is_manual_card(
+        db.get_sports_cards([item["sports_card_id"]]).get(item["sports_card_id"]) or {}
+    )
+
     fields = {}
-    for field in request.model_fields_set:
+    for field in request.model_fields_set - {"card"}:
         value = getattr(request, field)
         if field in ("quantity", "ownership_grade") and value is None:
             continue
         if field == "manual_source_url":
-            value = (value or "").strip() or None
+            value = _clean(value)
         fields[field] = value
 
     if "manual_value" in fields and fields["manual_value"] is None:
+        if manual_card:
+            raise HTTPException(
+                status_code=400,
+                detail="A card you added by hand needs your own value (CardSight has no sales for it).",
+            )
         fields["manual_source_url"] = None
 
-    if not fields:
+    card_details = None
+    if request.card is not None:
+        if not manual_card:
+            raise HTTPException(
+                status_code=400, detail="Only cards you added by hand can have their details changed."
+            )
+        details = request.card
+        card_details = {
+            "name": details.name.strip(),
+            "year": _clean(details.year),
+            "release_name": _clean(details.release_name),
+            "set_name": _clean(details.set_name),
+            "number": _clean((details.number or "").lstrip("#")),
+            "attributes": [details.league] if details.league else [],
+        }
+
+    if not fields and card_details is None:
         raise HTTPException(status_code=400, detail="Nothing to change.")
 
-    item = db.update_sports_item(item_id, fields)
+    if card_details is not None:
+        db.update_sports_card_details(item["sports_card_id"], card_details)
+    if fields:
+        item = db.update_sports_item(item_id, fields)
     sports.record_value("quantity" if set(fields) == {"quantity"} else "edit")
     return {"item": item}
 
