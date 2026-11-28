@@ -156,6 +156,92 @@ function GradeTable({ grades, owned }) {
   );
 }
 
+// One side of the sports Last Syncs card, laid out like the Pokemon one:
+// the cards whose value moved in the latest refresh, biggest move first.
+function SyncChanges({ title, refresh, changes }) {
+  const tone = (value) => (value >= 0 ? "positive" : "negative");
+  const net = changes.reduce((sum, change) => sum + change.change, 0);
+
+  return (
+    <div className="sync-section">
+      <h3>{title}</h3>
+
+      <p className="sync-summary-when">
+        {refresh ? `Prices refreshed ${refreshedText(refresh.finished_at)}` : "No refresh has finished yet."}
+      </p>
+
+      {changes.length > 0 && (
+        <p className="sync-summary-totals">
+          {changes.length} {changes.length === 1 ? "card" : "cards"} changed ·{" "}
+          <strong className={tone(net)}>{signedMoney(Math.round(net * 100) / 100)}</strong>
+        </p>
+      )}
+
+      {refresh && changes.length === 0 ? (
+        <div className="empty-state small">No prices changed.</div>
+      ) : (
+        changes.length > 0 && (
+          <div className="sync-summary-list">
+            {changes.map((change) => (
+              <div className="sync-change-row" key={`${change.item_id}-${change.grade}`}>
+                {photo(change.card, 225) && (
+                  <img src={photo(change.card, 225)} alt="" loading="lazy" referrerPolicy="no-referrer" />
+                )}
+
+                <div className="sync-change-copy">
+                  <strong>{cardName(change.card)}</strong>
+                  <span>
+                    {cardLine(change.card)}
+                    {change.grade !== "RAW" && ` · ${gradeLabel(change.grade)}`}
+                  </span>
+                  <span className="sync-change-prices">
+                    {money(change.previous_each)} → {money(change.value_each)}
+                    {change.quantity > 1 && ` ×${change.quantity}`}
+                  </span>
+                </div>
+
+                <div className={`sync-change-amount ${tone(change.change)}`}>
+                  <strong>{signedMoney(change.change)}</strong>
+                  <span>
+                    {change.change_pct === null || change.change_pct === undefined
+                      ? "—"
+                      : `${change.change_pct > 0 ? "+" : ""}${change.change_pct.toFixed(2)}%`}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {changes.length > 3 && (
+        <small className="sync-more">{changes.length - 3} more · scroll the list</small>
+      )}
+    </div>
+  );
+}
+
+function SportsLastSyncs({ refresh }) {
+  const changes = refresh?.changes || [];
+  return (
+    <section className="sync-summary-panel sports-sync">
+      <p className="eyebrow">LAST SYNCS</p>
+      <div className="sync-sections">
+        <SyncChanges
+          title="Raw cards"
+          refresh={refresh}
+          changes={changes.filter((change) => change.grade === "RAW")}
+        />
+        <SyncChanges
+          title="Graded cards"
+          refresh={refresh}
+          changes={changes.filter((change) => change.grade !== "RAW")}
+        />
+      </div>
+    </section>
+  );
+}
+
 function emptySearch() {
   return { name: "", year: "", number: "", set: "" };
 }
@@ -563,6 +649,8 @@ export default function SportsCards() {
         </div>
       ) : (
         <>
+          <SportsLastSyncs refresh={data?.last_refresh} />
+
           <div className="collection-search">
             <input
               type="search"

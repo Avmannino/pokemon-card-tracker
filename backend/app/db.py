@@ -523,11 +523,6 @@ def get_sports_cards_by_cardsight_ids(cardsight_ids) -> dict[str, dict[str, Any]
     return {row["cardsight_id"]: row for row in rows}
 
 
-def get_owned_sports_cards() -> list[dict[str, Any]]:
-    items = get_sports_items()
-    return list(get_sports_cards({item["sports_card_id"] for item in items}).values())
-
-
 def delete_sports_card(card_id: str) -> None:
     _sports(lambda: _client().table("sports_cards").delete().eq("id", card_id).execute())
 

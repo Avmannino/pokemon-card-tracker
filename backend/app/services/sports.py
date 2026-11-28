@@ -183,6 +183,48 @@ def last_refresh() -> dict[str, Any] | None:
     return state_store.get(REFRESH_KEY)
 
 
+def refresh_changes(
+    items: list[dict[str, Any]],
+    cards: dict[str, dict[str, Any]],
+    summaries: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """What a refresh changed: each card you own whose grade's value moved,
+    biggest dollar move (value x copies) first. Cards valued by your own
+    value, or priced for the first time, aren't changes."""
+    changes = []
+    for item in items:
+        card = cards.get(item["sports_card_id"])
+        if not card or item.get("manual_value") is not None:
+            continue
+        summary = summaries.get(card["cardsight_id"])
+        if summary is None:
+            continue
+
+        grade = item["ownership_grade"]
+        before = (_grades(card).get(grade) or {}).get("value")
+        after = ((summary.get("grades") or {}).get(grade) or {}).get("value")
+        if before is None or after is None or round(float(after) - float(before), 2) == 0:
+            continue
+
+        quantity = int(item.get("quantity") or 1)
+        each = round(float(after) - float(before), 2)
+        changes.append(
+            {
+                "item_id": item["id"],
+                "card": {**card_view(card), "photo_url": summary.get("photo_url") or card_view(card)["photo_url"]},
+                "grade": grade,
+                "quantity": quantity,
+                "previous_each": float(before),
+                "value_each": float(after),
+                "change": round(each * quantity, 2),
+                "change_pct": round(each / float(before) * 100, 2) if float(before) else None,
+            }
+        )
+
+    changes.sort(key=lambda change: -abs(change["change"]))
+    return changes
+
+
 _refreshing = False
 
 
@@ -202,8 +244,13 @@ async def refresh_prices(reason: str = "manual", now: datetime | None = None) ->
 
     _refreshing = True
     try:
-        cards = db.get_owned_sports_cards()
+        items = db.get_sports_items()
+        cards_by_id = db.get_sports_cards({item["sports_card_id"] for item in items})
+        cards = list(cards_by_id.values())
         summaries = await cardsight.get_prices([card["cardsight_id"] for card in cards])
+        # Compared before the old prices are overwritten. Only this refresh's
+        # changes are kept (replaced by the next one), never a history.
+        changes = refresh_changes(items, cards_by_id, summaries)
         db.save_sports_card_prices(
             [(card, summaries[card["cardsight_id"]]) for card in cards if card["cardsight_id"] in summaries]
         )
@@ -214,6 +261,8 @@ async def refresh_prices(reason: str = "manual", now: datetime | None = None) ->
             "cards": len(cards),
             "priced": len(summaries),
             "calls": math.ceil(len(cards) / cardsight.PRICING_BATCH),
+            "net_change": round(sum(change["change"] for change in changes), 2),
+            "changes": changes,
         }
         state_store.set(REFRESH_KEY, record)
         return record

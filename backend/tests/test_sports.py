@@ -237,10 +237,6 @@ class FakeSportsDB:
     def get_sports_cards_by_cardsight_ids(self, ids):
         return {row["cardsight_id"]: row for row in self.cards.values() if row["cardsight_id"] in set(ids)}
 
-    def get_owned_sports_cards(self):
-        used = {item["sports_card_id"] for item in self.items.values()}
-        return [row for row in self.cards.values() if row["id"] in used]
-
     def delete_sports_card(self, card_id):
         self.cards.pop(card_id, None)
 
@@ -300,7 +296,7 @@ class SportsApiTests(unittest.TestCase):
         ]
         for name in (
             "save_sports_card", "save_sports_card_prices", "get_sports_cards",
-            "get_sports_cards_by_cardsight_ids", "get_owned_sports_cards", "delete_sports_card",
+            "get_sports_cards_by_cardsight_ids", "delete_sports_card",
             "get_sports_items", "get_sports_item", "add_sports_item", "update_sports_item",
             "delete_sports_item", "sports_card_in_use",
         ):
@@ -368,6 +364,35 @@ class SportsApiTests(unittest.TestCase):
 
         self.assertEqual(self.client.post("/api/sports/refresh").status_code, 429)
         self.assertEqual(self.client.post("/api/sports/refresh?reason=scheduled").status_code, 200)
+
+    def test_refresh_lists_what_changed(self):
+        raw = self.client.post("/api/sports/items", json={"card": BO_REF, "quantity": 2}).json()["item"]
+        self.client.post("/api/sports/items", json={"card": BO_REF, "ownership_grade": "PSA_9"})
+        manual = self.client.post(
+            "/api/sports/items", json={"card": BO_REF, "ownership_grade": "PSA_8", "manual_value": 40}
+        ).json()["item"]
+        # Raw was $1.29 and PSA 9 $22.75 when added; now $1.50 and $20.
+        summary = cardsight.summarize(
+            pricing_data(raw=[sale(1.50, 20)], psa9=[sale(20.0, 21)], psa10=[sale(233.25, 12)])
+        )
+
+        async def new_prices(ids):
+            return {BO: summary}
+
+        with mock.patch.object(cardsight, "get_prices", new_prices):
+            record = self.client.post("/api/sports/refresh").json()
+
+        changes = {change["grade"]: change for change in record["changes"]}
+        self.assertEqual(set(changes), {"RAW", "PSA_9"})
+        self.assertEqual(record["changes"][0]["grade"], "PSA_9")
+        self.assertEqual(changes["RAW"]["change"], 0.42)
+        self.assertEqual(changes["RAW"]["item_id"], raw["id"])
+        self.assertEqual(changes["PSA_9"]["change"], -2.75)
+        self.assertEqual(record["net_change"], -2.33)
+        self.assertNotIn(manual["id"], [change["item_id"] for change in record["changes"]])
+
+        collection = self.client.get("/api/sports/collection").json()
+        self.assertEqual(collection["last_refresh"]["net_change"], -2.33)
 
     def test_missing_tables_and_key_are_explained(self):
         def missing():
