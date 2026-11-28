@@ -1040,7 +1040,8 @@ export default function SportsCards({ onChange }) {
                         ...(text.trim() ? manualFieldsFrom(text) : {}),
                       }));
                     }}
-                    placeholder="1984 Topps Nestlé Dream Team – Dave Winfield #6"
+                    placeholder="Topps Nestle Dream Team Steve Garvey 1984 #12"
+                    autoFocus
                   />
                 </label>
 
@@ -1056,8 +1057,15 @@ export default function SportsCards({ onChange }) {
                   <input
                     value={manualForm.name}
                     onChange={(event) => setManualForm((current) => ({ ...current, name: event.target.value }))}
+                    onPaste={(event) => {
+                      // A full card line pasted here fills every field too.
+                      const text = event.clipboardData.getData("text");
+                      const parsed = parseCardLine(text);
+                      if (!parsed.year && !parsed.number && !parsed.release_name) return;
+                      event.preventDefault();
+                      setManualForm((current) => ({ ...current, paste: text, ...manualFieldsFrom(text) }));
+                    }}
                     placeholder="Derek Jeter"
-                    autoFocus
                   />
                 </label>
 

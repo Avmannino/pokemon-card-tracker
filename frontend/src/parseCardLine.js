@@ -5,13 +5,18 @@
 //   "1992 Topps Stadium Club Nolan Ryan – Members Choice #605"
 //     -> year 1992, set "Topps Stadium Club", subset "Members Choice",
 //        name "Nolan Ryan", number 605
-//   "2003 Upper Deck Yankees 100th Anniversary Derek Jeter #12"
-//     -> the player is the last two words (three with Jr./Sr./II/III)
+//   "Topps Nestle Dream Team Steve Garvey 1984 #12"
+//     -> year 1984, set "Nestle Dream Team", name "Steve Garvey", number 12
 //
+// The number (#12) and year (a standalone 18xx-20xx) can be anywhere.
 // Parts split on dashes with spaces around them (so "O-Pee-Chee" and
 // "All-Star" stay whole), en/em dashes and "|". The part naming a card
 // maker is the set, a part that reads like a person's name is the player,
-// and anything else is the subset. Returns only the parts it found.
+// and anything else is the subset. With no separators, the player is the
+// two or three name-like words before or after the set. The maker word that
+// starts a set ("Topps", "Upper Deck"...) is dropped when more follows, so
+// "Topps Nestle Dream Team" is "Nestle Dream Team". Returns only the parts
+// it found.
 
 const MAKERS = [
   "topps", "upper deck", "donruss", "fleer", "score", "bowman", "leaf",
@@ -33,6 +38,9 @@ const SUBSET_WORDS = [
 ];
 
 const SUFFIXES = new Set(["jr", "jr.", "sr", "sr.", "ii", "iii", "iv"]);
+
+// Card makers dropped from the start of a set name when more follows.
+const LEADING_MAKERS = ["upper deck", "topps", "donruss", "fleer", "bowman", "panini", "leaf"];
 
 const SEPARATORS = /\s*[–—]\s*|\s+-\s+|\s*\|\s*/;
 
@@ -59,20 +67,45 @@ function looksLikeName(part) {
 }
 
 // "Topps Stadium Club Nolan Ryan" -> set "Topps Stadium Club", name
-// "Nolan Ryan"; null when the end doesn't read like a name.
-function splitTrailingName(text) {
+// "Nolan Ryan"; "Steve Garvey Topps Nestle Dream Team" -> name first. Null
+// when neither end reads like a name.
+function splitName(text) {
   const words = text.split(" ").filter(Boolean);
-  const last = (words[words.length - 1] || "").toLowerCase();
-  const size = SUFFIXES.has(last) ? 3 : 2;
-  if (words.length <= size) {
-    return null;
+
+  for (const size of [3, 2]) {
+    if (words.length > size) {
+      const trailing = words.slice(-size).join(" ");
+      const last = words[words.length - 1].toLowerCase();
+      if ((size === 3) === SUFFIXES.has(last) && looksLikeName(trailing)) {
+        return { set: words.slice(0, -size).join(" "), name: trailing };
+      }
+    }
   }
 
-  const name = words.slice(-size).join(" ");
-  if (!looksLikeName(name)) {
-    return null;
+  for (const size of [3, 2]) {
+    if (words.length > size) {
+      const leading = words.slice(0, size).join(" ");
+      const last = words[size - 1].toLowerCase().replace(/,$/, "");
+      const rest = words.slice(size).join(" ");
+      if ((size === 3) === SUFFIXES.has(last) && looksLikeName(leading) && isMaker(rest)) {
+        return { set: rest, name: leading };
+      }
+    }
   }
-  return { set: words.slice(0, -size).join(" "), name };
+
+  return null;
+}
+
+function withoutLeadingMaker(set) {
+  const lower = set.toLowerCase();
+  for (const maker of LEADING_MAKERS) {
+    if (lower.startsWith(`${maker} `)) {
+      const rest = set.slice(maker.length).trim();
+      // "Topps Big" stays: one word alone isn't a set name.
+      return rest.split(" ").length >= 2 ? rest : set;
+    }
+  }
+  return set;
 }
 
 export function parseCardLine(text) {
@@ -86,11 +119,12 @@ export function parseCardLine(text) {
   }
 
   rest = rest.replace(/\s+/g, " ").trim();
-  const year = rest.match(/^((?:18|19|20)\d{2})(?:[-/]\d{2,4})?(?=\s|$)/);
+  const year = rest.match(/(^|\s)((?:18|19|20)\d{2}(?:[-/]\d{2,4})?)(?=\s|$)/);
   if (year) {
-    result.year = year[0];
-    rest = rest.slice(year[0].length);
+    result.year = year[2];
+    rest = `${rest.slice(0, year.index)} ${rest.slice(year.index + year[0].length)}`;
   }
+  rest = rest.replace(/\s+/g, " ").replace(/\s+([–—|,])/g, " $1");
 
   rest = rest.replace(/^[\s–—|,:-]+|[\s–—|,:-]+$/g, "");
   const parts = rest.split(SEPARATORS).map((part) => part.trim()).filter(Boolean);
@@ -104,7 +138,7 @@ export function parseCardLine(text) {
   const subset = others.filter((_, index) => index !== setIndex);
 
   if (!name && set) {
-    const split = splitTrailingName(set);
+    const split = splitName(set);
     if (split) {
       set = split.set;
       name = split.name;
@@ -112,7 +146,7 @@ export function parseCardLine(text) {
   }
 
   if (name) result.name = name;
-  if (set) result.release_name = set;
+  if (set) result.release_name = withoutLeadingMaker(set);
   if (subset.length) result.set_name = subset.join(" ");
   return result;
 }
