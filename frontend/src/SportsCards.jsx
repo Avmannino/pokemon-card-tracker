@@ -416,10 +416,13 @@ export default function SportsCards() {
     }
   }
 
+  // Every Add Card starts blank: no earlier search, results or card.
   function openAdd() {
-    setAddOpen(true);
-    setModalError("");
+    setSearch(emptySearch());
+    setResults(null);
     setAddForm(emptyAdd());
+    setModalError("");
+    setAddOpen(true);
   }
 
   function closeAdd() {
@@ -516,7 +519,7 @@ export default function SportsCards() {
       if (response.price_error) {
         setError(`Added, but it couldn't be priced yet: ${response.price_error}`);
       }
-      setAddForm(emptyAdd());
+      closeAdd();
       await load({ quiet: true });
     } catch (err) {
       setModalError(err.message);
