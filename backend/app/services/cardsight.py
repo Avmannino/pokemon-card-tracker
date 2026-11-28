@@ -49,6 +49,16 @@ LOT_TITLE = re.compile(
     r"\b(lots?|set of|complete set|team set|\d+\s*cards)\b", re.IGNORECASE
 )
 
+# Signed copies sell for far more than the card itself: "signed", "auto",
+# "autographed", authentication (JSA, PSA/DNA, Beckett, COA), "inscribed",
+# "in person". Shared with cardapi.
+SIGNED_TITLE = re.compile(
+    r"\b(signed|sgd|autograph(?:ed|s)?|autos?|jsa|coa|psa\s*/?\s*dna|"
+    r"beckett\s+(?:authenticated|auth|bas)|bas\s+(?:coa|auth\w*)|inscribed|"
+    r"in[\s-]person|ip)\b",
+    re.IGNORECASE,
+)
+
 # "Ken Griffey Jr." is "Ken Griffey, Jr." in the catalog, so a search that
 # finds nothing is retried by surname without these.
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
@@ -267,6 +277,7 @@ def _sales(records: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if isinstance(record.get("price"), (int, float))
         and record["price"] > 0
         and not LOT_TITLE.search(record.get("title") or "")
+        and not SIGNED_TITLE.search(record.get("title") or "")
     ]
     sales.sort(key=lambda record: record.get("date") or "", reverse=True)
     return sales

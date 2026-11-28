@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from ..config import settings
+from .cardsight import SIGNED_TITLE
 
 
 BASE_URL = "https://www.thecardapi.com/api/v1/market"
@@ -99,12 +100,24 @@ def query_for(card: dict[str, Any]) -> str | None:
     return query if len(query) >= 4 else None
 
 
+def is_signed(record: dict[str, Any]) -> bool:
+    """A signed copy, by its title or The Card API's autograph fields."""
+    if SIGNED_TITLE.search(record.get("title") or ""):
+        return True
+    if record.get("has_autograph_grade") or record.get("autograph_grade"):
+        return True
+    return any(
+        "auto" in str(feature).lower() or "sign" in str(feature).lower()
+        for feature in record.get("features") or []
+    )
+
+
 def _matches(record: dict[str, Any], card: dict[str, Any]) -> bool:
     """The sale is this card: the player and number are in it, the year is
-    within one (sets dated by season, e.g. "1990-91"), and it isn't a lot or
-    a reprint."""
+    within one (sets dated by season, e.g. "1990-91"), and it isn't a lot,
+    a reprint or a signed copy."""
     title = record.get("title") or ""
-    if not title or EXCLUDED_TITLE.search(title):
+    if not title or EXCLUDED_TITLE.search(title) or is_signed(record):
         return False
 
     surname = _surname(card.get("name"))

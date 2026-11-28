@@ -82,6 +82,14 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(summary["photo_url"], "https://i.ebayimg.com/14.jpg")
         self.assertEqual(summary["card"]["release_name"], "Stadium Club")
 
+    def test_signed_copies_are_left_out(self):
+        raw = [sale(2.0, day) for day in range(1, 4)] + [
+            sale(45.0, 5, title="Bo Jackson Signed 1991 Stadium Club #224 JSA"),
+            sale(60.0, 6, title="1991 Stadium Club Bo Jackson #224 Autograph Auto"),
+        ]
+        summary = cardsight.summarize(pricing_data(raw=raw))
+        self.assertEqual((summary["grades"]["RAW"]["value"], summary["grades"]["RAW"]["sales"]), (2.0, 3))
+
     def test_grade_keys(self):
         self.assertEqual(cardsight.grade_key("PSA", "10"), "PSA_10")
         self.assertEqual(cardsight.grade_key("psa", "9.0"), "PSA_9")
@@ -587,6 +595,13 @@ class CardApiTests(unittest.TestCase):
             card_api_sale(80.0, 23, "Frank Thomas Major League Debut #153", grader="PSA", grade="9"),
             card_api_sale(150.0, 24, "Frank Thomas Major League Debut #153 PSA 10 GEM MINT"),
             card_api_sale(60.0, 24, "Frank Thomas Major League Debut #153 BGS 9.5"),
+            # Signed copies, by title or by The Card API's own fields.
+            card_api_sale(250.0, 24, "Frank Thomas Signed 1990 Major League Debut #153 JSA"),
+            card_api_sale(180.0, 24, "Frank Thomas Major League Debut #153 AUTO PSA/DNA"),
+            card_api_sale(120.0, 24, "Frank Thomas Major League Debut #153 Autographed"),
+            card_api_sale(90.0, 24, "Frank Thomas Major League Debut #153 IP Auto"),
+            {**card_api_sale(300.0, 24, "Frank Thomas Major League Debut #153 PSA 10"), "autograph_grade": "10"},
+            {**card_api_sale(75.0, 24, "Frank Thomas Major League Debut #153"), "features": ["Autograph"]},
         ]
         grades = cardapi.summarize(records, self.THOMAS)["grades"]
         self.assertEqual(grades["RAW"], {**grades["RAW"], "value": 11.0, "sales": 2})
