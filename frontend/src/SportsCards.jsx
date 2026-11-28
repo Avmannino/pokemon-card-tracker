@@ -325,6 +325,8 @@ export default function SportsCards({ onChange }) {
   const [addOpen, setAddOpen] = useState(false);
   const [search, setSearch] = useState(emptySearch());
   const [results, setResults] = useState(null);
+  // The search those results are for (the fields may have changed since).
+  const [searchedFor, setSearchedFor] = useState(null);
   const [searching, setSearching] = useState(false);
   const [resultPrices, setResultPrices] = useState({});
   const [pricing, setPricing] = useState(false);
@@ -473,6 +475,7 @@ export default function SportsCards({ onChange }) {
   function openAdd() {
     setSearch(emptySearch());
     setResults(null);
+    setSearchedFor(null);
     setAddForm(emptyAdd());
     setManualForm(null);
     setModalError("");
@@ -533,6 +536,7 @@ export default function SportsCards({ onChange }) {
     try {
       const response = await searchSportsCards(search);
       setResults(response.results || []);
+      setSearchedFor(search);
       setData((current) => (current ? { ...current, usage: response.usage } : current));
     } catch (err) {
       setModalError(err.message);
@@ -1266,11 +1270,40 @@ export default function SportsCards({ onChange }) {
                   </button>
                 </div>
 
-                {results && results.length === 0 && (
-                  <div className="empty-state">
-                    No cards found. Try just the last name, or leave out the card number.
-                  </div>
-                )}
+                {/* CardSight's catalog is missing some sets (e.g. 1991 Topps
+                    '90 Major League Debut), so a miss leads straight to
+                    adding the card by hand, filled in from the search. */}
+                {results && searchedFor && (() => {
+                  const number = searchedFor.number.trim().replace(/^#/, "").toLowerCase();
+                  const numberMissing =
+                    number &&
+                    results.length > 0 &&
+                    !results.some((card) => (card.number || "").toLowerCase() === number);
+                  if (results.length > 0 && !numberMissing) return null;
+                  return (
+                    <div className="sports-not-found">
+                      <div>
+                        <strong>
+                          {results.length === 0
+                            ? "CardSight doesn't have this card."
+                            : `None of these is #${number}. CardSight may not have this card.`}
+                        </strong>
+                        <span>
+                          Its catalog is missing some sets. Add the card by hand with your own value. That uses no calls.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalError("");
+                          setManualForm(emptyManual(searchedFor));
+                        }}
+                      >
+                        Add it by hand
+                      </button>
+                    </div>
+                  );
+                })()}
 
                 {results && results.length > 0 && (
                   <>

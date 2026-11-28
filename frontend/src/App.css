@@ -4384,3 +4384,62 @@ button.portfolio-card {
 .sports-manual-preview strong {
   color: #f0f4ff;
 }
+
+.sports-not-found {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  gap: 12px 16px;
+
+  margin-bottom: 14px;
+
+  padding: 14px 16px;
+
+  border: 1px solid #5a4a24;
+  border-radius: 12px;
+
+  background: rgba(214, 150, 54, 0.1);
+}
+
+.sports-not-found div {
+  display: flex;
+
+  flex: 1 1 260px;
+
+  flex-direction: column;
+
+  gap: 4px;
+}
+
+.sports-not-found strong {
+  color: #f0d29a;
+
+  font-size: 0.9rem;
+}
+
+.sports-not-found span {
+  color: #aeb6c6;
+
+  font-size: 0.8rem;
+}
+
+.sports-not-found button {
+  padding: 11px 18px;
+
+  border-radius: 12px;
+
+  background: #3567d8;
+
+  color: #ffffff;
+
+  font-weight: 750;
+}
+
+.sports-not-found button:hover {
+  background: #4274e4;
+}
